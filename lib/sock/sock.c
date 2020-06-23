@@ -39,7 +39,7 @@
 #include "spdk/queue.h"
 
 #define SPDK_SOCK_DEFAULT_PRIORITY 0
-#define SPDK_SOCK_DEFAULT_NO_ZCOPY true
+#define SPDK_SOCK_DEFAULT_NO_ZCOPY false
 #define SPDK_SOCK_OPTS_FIELD_OK(opts, field) (offsetof(struct spdk_sock_opts, field) + sizeof(opts->field) <= (opts->opts_size))
 
 static STAILQ_HEAD(, spdk_net_impl) g_net_impls = STAILQ_HEAD_INITIALIZER(g_net_impls);

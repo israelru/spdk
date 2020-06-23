@@ -537,12 +537,7 @@ retry:
 		return NULL;
 	}
 
-	if (type == SPDK_SOCK_CREATE_LISTEN) {
-		/* Only enable zero copy for non-loopback sockets. */
-		enable_zero_copy = !sock_is_loopback(fd);
-	} else if (type == SPDK_SOCK_CREATE_CONNECT) {
-		enable_zero_copy = !opts->no_zcopy;
-	}
+	enable_zero_copy = !opts->no_zcopy && !sock_is_loopback(fd);
 
 	sock = posix_sock_alloc(fd, enable_zero_copy);
 	if (sock == NULL) {
