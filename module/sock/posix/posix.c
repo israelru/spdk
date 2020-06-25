@@ -60,14 +60,12 @@
 struct spdk_posix_sock {
 	struct spdk_sock	base;
 	int			fd;
-
 	uint32_t		sendmsg_idx;
-	bool			zcopy;
-
 	struct spdk_pipe	*recv_pipe;
 	void			*recv_buf;
 	int			recv_buf_sz;
 	bool			pending_recv;
+	bool			zcopy;
 
 	TAILQ_ENTRY(spdk_posix_sock)	link;
 };
