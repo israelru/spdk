@@ -124,7 +124,8 @@ struct nvme_tcp_req {
 		uint8_t				data_recv : 1;
 		uint8_t				h2c_transfer: 1;
 		uint8_t				h2c_send_ack : 1;
-		uint8_t				reserved : 4;
+		uint8_t				waiting_send_ack : 1;
+		uint8_t				reserved : 3;
 	} ordering;
 	struct nvme_tcp_pdu			*send_pdu;
 	struct iovec				iov[NVME_TCP_MAX_SGL_DESCRIPTORS];
@@ -178,6 +179,7 @@ nvme_tcp_req_get(struct nvme_tcp_qpair *tqpair)
 	tcp_req->ordering.data_recv = 0;
 	tcp_req->ordering.h2c_send_ack = 0;
 	tcp_req->ordering.h2c_transfer = 0;
+	tcp_req->ordering.waiting_send_ack = 0;
 	memset(tcp_req->send_pdu, 0, sizeof(struct nvme_tcp_pdu));
 	TAILQ_INSERT_TAIL(&tqpair->outstanding_reqs, tcp_req, link);
 
@@ -526,6 +528,13 @@ nvme_tcp_qpair_cmd_send_complete(void *cb_arg)
 	struct nvme_tcp_req *tcp_req = cb_arg;
 
 	tcp_req->ordering.send_ack = 1;
+
+	if (tcp_req->ordering.waiting_send_ack) {
+		tcp_req->ordering.waiting_send_ack = 0;
+		nvme_tcp_send_h2c_data(tcp_req);
+		return;
+	}
+
 	nvme_tcp_req_put_safe(tcp_req);
 }
 
@@ -1260,6 +1269,12 @@ nvme_tcp_r2t_hdr_handle(struct nvme_tcp_qpair *tqpair, struct nvme_tcp_pdu *pdu)
 	nvme_tcp_qpair_set_recv_state(tqpair, NVME_TCP_PDU_RECV_STATE_AWAIT_PDU_READY);
 
 	tcp_req->ordering.h2c_transfer = 1;
+
+	if (!tcp_req->ordering.send_ack) {
+		SPDK_DEBUGLOG(SPDK_LOG_NVME, "tcp_req %p: waiting for send_ack\n", tcp_req);
+		tcp_req->ordering.waiting_send_ack = 1;
+		return;
+	}
 
 	nvme_tcp_send_h2c_data(tcp_req);
 	return;
