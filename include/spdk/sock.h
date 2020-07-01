@@ -117,6 +117,11 @@ struct spdk_sock_opts {
 	 * The priority on the socket and default value is zero.
 	 */
 	int priority;
+
+	/**
+	 * Used to disable zero copy on socket layer.
+	 */
+	bool no_zcopy;
 };
 
 /**
