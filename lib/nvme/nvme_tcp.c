@@ -93,7 +93,8 @@ struct nvme_tcp_qpair {
 		uint16_t host_hdgst_enable: 1;
 		uint16_t host_ddgst_enable: 1;
 		uint16_t icreq_send_ack: 1;
-		uint16_t reserved: 13;
+		uint16_t poll_group_ctx: 1;
+		uint16_t reserved: 12;
 	} flags;
 
 	/** Specifies the maximum number of PDU-Data bytes per H2C Data Transfer PDU */
@@ -1540,12 +1541,22 @@ nvme_tcp_qpair_check_timeout(struct spdk_nvme_qpair *qpair)
 	}
 }
 
+static void
+dummy_disconnected_qpair_cb(struct spdk_nvme_qpair *qpair, void *poll_group_ctx)
+{
+}
+
 static int
 nvme_tcp_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_completions)
 {
 	struct nvme_tcp_qpair *tqpair = nvme_tcp_qpair(qpair);
 	uint32_t reaped;
 	int rc;
+
+	if (qpair->poll_group != NULL && !tqpair->flags.poll_group_ctx) {
+		return spdk_nvme_poll_group_process_completions(qpair->poll_group->group, max_completions,
+				dummy_disconnected_qpair_cb);
+	}
 
 	rc = spdk_sock_flush(tqpair->sock);
 	if (rc < 0) {
@@ -1598,10 +1609,13 @@ static void
 nvme_tcp_qpair_sock_cb(void *ctx, struct spdk_sock_group *group, struct spdk_sock *sock)
 {
 	struct spdk_nvme_qpair *qpair = ctx;
+	struct nvme_tcp_qpair *tqpair = nvme_tcp_qpair(qpair);
 	struct nvme_tcp_poll_group *pgroup = nvme_tcp_poll_group(qpair->poll_group);
 	int32_t num_completions;
 
+	tqpair->flags.poll_group_ctx = 1;
 	num_completions = spdk_nvme_qpair_process_completions(qpair, pgroup->completions_per_qpair);
+	tqpair->flags.poll_group_ctx = 0;
 
 	if (pgroup->num_completions >= 0 && num_completions >= 0) {
 		pgroup->num_completions += num_completions;
