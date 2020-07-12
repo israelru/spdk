@@ -486,6 +486,7 @@ struct spdk_nvmf_rdma_poll_group {
 	struct spdk_io_pacer				*pacer;
 	struct spdk_io_pacer_tuner			*pacer_tuner;
 	struct spdk_io_pacer_tuner2			*pacer_tuner2;
+	struct spdk_io_pacer_tuner3			*pacer_tuner3;
 	/*
 	 * buffers which are split across multiple RDMA
 	 * memory regions cannot be used by this transport.
@@ -2187,6 +2188,7 @@ spdk_nvmf_rdma_request_process(struct spdk_nvmf_rdma_transport *rtransport,
 
 			rdma_req->pacer_key = ((uint64_t)rqpair->qpair.ctrlr->subsys->id << 32) +
 				rdma_req->req.cmd->nvme_cmd.nsid;
+			spdk_io_pacer_drive_stats_try_init(rdma_req->pacer_key, ns->bdev);
 			spdk_io_pacer_push(rgroup->pacer,
 					   rdma_req->pacer_key,
 					   &rdma_req->pacer_entry);
@@ -3574,6 +3576,21 @@ spdk_nvmf_rdma_poll_group_create(struct spdk_nvmf_transport *transport)
 		}
 #endif
 	}
+#define ONE_SECOND 1000000
+    if (transport->opts.io_pacer_disk_credit != 0) {
+        static volatile int tuner3_initialized = 0; /* FIXME need real critical section */
+        if (!tuner3_initialized) {
+            tuner3_initialized = 1;
+	    SPDK_ERRLOG("Creating tuner3 with credit %d\n", transport->opts.io_pacer_disk_credit);
+            rgroup->pacer_tuner3 = spdk_io_pacer_tuner3_create(rgroup->pacer, ONE_SECOND / 100);
+            if (!rgroup->pacer_tuner3) {
+                SPDK_ERRLOG("Failed to create IO pacer tuner3\n");
+                spdk_nvmf_rdma_poll_group_destroy(&rgroup->group);
+                pthread_mutex_unlock(&rtransport->lock);
+                return NULL;
+            }
+        }
+    }
 
 	/* @todo: there is no good place to create queues. */
 #if 0
@@ -3701,6 +3718,8 @@ spdk_nvmf_rdma_poll_group_destroy(struct spdk_nvmf_transport_poll_group *group)
 			spdk_io_pacer_tuner_destroy(rgroup->pacer_tuner);
 		} else if (rgroup->pacer_tuner2) {
 			spdk_io_pacer_tuner2_destroy(rgroup->pacer_tuner2);
+		} else if (rgroup->pacer_tuner3) {
+			spdk_io_pacer_tuner3_destroy(rgroup->pacer_tuner3);
 		}
 
 		spdk_io_pacer_destroy(rgroup->pacer);

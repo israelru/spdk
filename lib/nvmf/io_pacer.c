@@ -30,6 +30,8 @@
  *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <alloca.h>
+
 #include "spdk/config.h"
 #include "io_pacer.h"
 #include "spdk/stdinc.h"
@@ -37,6 +39,7 @@
 #include "spdk/likely.h"
 #include "spdk_internal/assert.h"
 #include "spdk_internal/log.h"
+#include "spdk/bdev.h"
 
 #define IO_PACER_DEFAULT_MAX_QUEUES 32
 
@@ -47,7 +50,6 @@ extern __itt_domain *io_pacer_domain;
 #endif /* SPDK_CONFIG_VTUNE */
 
 
-#define MAX_DRIVES_STATS 256
 static rte_spinlock_t drives_stats_create_lock = RTE_SPINLOCK_INITIALIZER;
 struct spdk_io_pacer_drives_stats drives_stats = {0};
 
@@ -100,6 +102,7 @@ io_pacer_get_queue(struct spdk_io_pacer *pacer, uint64_t key)
 	 */
 	if (0 != spdk_io_pacer_create_queue(pacer, key)) {
 		return NULL;
+
 	}
 
 	return io_pacer_get_queue(pacer, key);
@@ -123,7 +126,8 @@ io_pacer_poll(void *arg)
 	static __thread uint64_t poll_cnt;
 	poll_cnt++;
 	if (poll_cnt % 100 == 0)
-		__itt_task_begin(io_pacer_domain, __itt_null, __itt_null, io_pacer_poll_task);
+		__itt_task_begin(io_pacer_domain, __itt_null,
+				 __itt_null, io_pacer_poll_task);
 #endif /* SPDK_CONFIG_VTUNE */
 
 	pacer->stat.calls++;
@@ -241,7 +245,7 @@ spdk_io_pacer_destroy(struct spdk_io_pacer *pacer)
 	SPDK_NOTICELOG("Destroyed IO pacer %p\n", pacer);
 }
 
-void spdk_io_pacer_drive_stats_setup(struct spdk_io_pacer_drives_stats *stats, int32_t entries)
+static inline void spdk_io_pacer_drive_stats_setup(struct spdk_io_pacer_drives_stats *stats, int32_t entries)
 {
 	struct rte_hash_parameters hash_params = {
 		.name = "DRIVE_STATS",
@@ -300,7 +304,6 @@ spdk_io_pacer_create_queue(struct spdk_io_pacer *pacer, uint64_t key)
 
 	pacer->queues[pacer->num_queues].key = key;
 	STAILQ_INIT(&pacer->queues[pacer->num_queues].queue);
-	spdk_io_pacer_drive_stats_setup(&drives_stats, MAX_DRIVES_STATS);
 	pacer->queues[pacer->num_queues].stats = spdk_io_pacer_drive_stats_get(&drives_stats, key);
 	pacer->num_queues++;
 	SPDK_NOTICELOG("Created IO pacer queue: pacer %p, key %016lx\n",
@@ -548,7 +551,6 @@ spdk_io_pacer_tuner2_create(struct spdk_io_pacer *pacer,
 		       tuner->value,
 		       tuner->min_threshold,
 		       tuner->factor);
-
 	return tuner;
 }
 
@@ -561,3 +563,290 @@ spdk_io_pacer_tuner2_destroy(struct spdk_io_pacer_tuner2 *tuner)
 	free(tuner);
 	SPDK_NOTICELOG("Destroyed IO pacer tuner %p\n", tuner);
 }
+
+struct spdk_io_pacer_tuner3 {
+	struct spdk_io_pacer *pacer;
+	struct spdk_poller *poller;
+    uint64_t period_us;
+};
+
+static void
+_spdk_bdev_histogram_status_cb(void *cb_arg, int status)
+{
+}
+
+
+static void
+get_iostat_cb(struct spdk_bdev *bdev,
+	      struct spdk_bdev_io_stat *stat, void *cb_arg, int rc)
+{
+	struct drive_stats *s = cb_arg;
+
+	if (rc != 0) {
+		SPDK_NOTICELOG("error: %d\n", rc);
+		goto done;
+	}
+	s->read_latency_ticks = stat->read_latency_ticks;
+	s->write_latency_ticks = stat->write_latency_ticks;
+done:
+	free(stat);
+}
+
+static int
+io_pacer_tune3(void *arg)
+{
+	struct spdk_io_pacer_tuner2 *tuner = arg;
+	struct spdk_io_pacer *pacer = tuner->pacer;
+
+	const void *next_key;
+	void *next_data;
+	uint32_t iter = 0;
+	uint32_t found_initialized = 0;
+	uint32_t drives_count = 0;
+
+	const uint64_t total_cache_to_share = 12 * (1 << 20);
+	uint32_t credit_bins = 2;
+	struct drive_stats *stats_list[MAX_DRIVES_STATS] = {0};
+	enum tune_state {NOT_READY, READY_TO_COLLECT, COLLECTING,
+		REQUESTING_LATENCIES, APPLYING, SLEEPING};
+
+	static __thread enum tune_state state = NOT_READY;
+	const uint64_t COLLECTING_TIME = 10;
+	const uint64_t SLEEPING_TIME = 500;
+	static __thread uint64_t collecting_time_counter = 0;
+	static __thread uint64_t sleeping_time_counter = 0;
+
+	uint64_t min_read_latency_ticks = 0;
+	uint64_t max_read_latency_ticks = 0;
+	uint64_t min_write_latency_ticks = 0;
+	uint64_t max_write_latency_ticks = 0;
+	float tg = 0.;
+	uint32_t weight_total = 0;
+	/* really try_to_setup */ /* FIXME rename function */
+	spdk_io_pacer_drive_stats_setup(&drives_stats, MAX_DRIVES_STATS);
+
+	drives_count = rte_hash_count(drives_stats.h);
+	if (drives_count == 0) {
+		/* Earlier exit as no drives touched yet */
+		goto done;
+	}
+
+	/* just to collect all drive_stats pointers to single array for
+	 * simplicity */
+	/* during collection amount can be (and will be) changed so we need real re-counting
+	 * */
+
+	drives_count = 0;
+	while (rte_hash_iterate(drives_stats.h, &next_key, &next_data, &iter) >= 0) {
+		struct drive_stats *stats = next_data;
+		struct spdk_bdev_io_stat *bdev_stat = NULL;
+		stats_list[drives_count] = stats;
+		++drives_count;
+	}
+
+	switch (state) {
+	case NOT_READY:
+		SPDK_NOTICELOG("Tune3 starting latency collection\n");
+		for (iter = 0; iter < drives_count; iter++) {
+			spdk_bdev_histogram_enable(stats_list[iter]->bdev,
+						   _spdk_bdev_histogram_status_cb,
+						   NULL, true);
+		}
+		state = READY_TO_COLLECT;
+		break; /* TODO check if we can remove this break */
+	case READY_TO_COLLECT:
+		SPDK_NOTICELOG("Tune3 starting latency requesting\n");
+		for (iter = 0; iter < drives_count; iter++) {
+			struct drive_stats *stats = stats_list[iter];
+			struct spdk_bdev_io_stat *bdev_stat = NULL;
+			bdev_stat = calloc(1, sizeof(struct spdk_bdev_io_stat));
+			spdk_bdev_get_device_stat(stats->bdev, bdev_stat,
+						  get_iostat_cb, stats);
+		}
+		state = COLLECTING;
+		collecting_time_counter=0;
+		break;
+	case COLLECTING:
+		if (collecting_time_counter == COLLECTING_TIME) {
+			SPDK_NOTICELOG("Tune3 stopping latency collection\n");
+			for (iter = 0; iter < drives_count; iter++) {
+				spdk_bdev_histogram_enable(stats_list[iter]->bdev,
+							   _spdk_bdev_histogram_status_cb,
+							   NULL, false);
+			}
+			state = APPLYING;
+		} else {
+			++collecting_time_counter;
+		}
+		break; /* TODO check if we can remove this break */
+	case APPLYING:
+		SPDK_NOTICELOG("Tune3 start tuning: drives_count: %"PRIu32"\n",
+			       drives_count);
+		min_read_latency_ticks = max_read_latency_ticks =
+			stats_list[0]->read_latency_ticks;
+		min_write_latency_ticks = max_write_latency_ticks =
+			stats_list[0]->write_latency_ticks;
+		for (iter = 0; iter < drives_count; iter++) {
+			const char *bdev_name = NULL;
+			bdev_name = spdk_bdev_get_name(stats_list[iter]->bdev);
+			if (stats_list[iter]->read_latency_ticks < min_read_latency_ticks) 
+				min_read_latency_ticks = stats_list[iter]->read_latency_ticks;
+			if (stats_list[iter]->read_latency_ticks > max_read_latency_ticks) 
+				max_read_latency_ticks = stats_list[iter]->read_latency_ticks;
+			if (stats_list[iter]->write_latency_ticks < min_write_latency_ticks) 
+				min_write_latency_ticks = stats_list[iter]->write_latency_ticks;
+			if (stats_list[iter]->write_latency_ticks > max_write_latency_ticks) 
+				max_write_latency_ticks = stats_list[iter]->write_latency_ticks;
+			SPDK_NOTICELOG("Tune3 %s read_latency_ticks: %"PRIu64"\n",
+				       bdev_name,
+				       stats_list[iter]->read_latency_ticks);
+		}
+		state = SLEEPING;
+		SPDK_NOTICELOG("Tune3 found "
+			       "min_read: %"PRIu64
+			       ", max_read: %"PRIu64
+			       ", min_write: %"PRIu64
+			       ", max_write: %"PRIu64"\n",
+			       min_read_latency_ticks,
+			       max_read_latency_ticks,
+			       min_write_latency_ticks,
+			       max_write_latency_ticks);
+
+		tg = (float) credit_bins /
+			((float) max_read_latency_ticks -
+			 (float) min_read_latency_ticks);
+
+		for (iter = 0; iter < drives_count; iter++) {
+			const char *bdev_name = NULL;
+			uint8_t bin_number = tg * (float) (stats_list[iter]->read_latency_ticks - min_read_latency_ticks);
+			stats_list[iter]->weight = credit_bins - bin_number;
+			weight_total += stats_list[iter]->weight;
+			bdev_name = spdk_bdev_get_name(stats_list[iter]->bdev);
+			SPDK_NOTICELOG("Tune3 %s read_latency_ticks: %"PRIu64" -> weight: %"PRIu8"\n",
+				       bdev_name,
+				       stats_list[iter]->read_latency_ticks,
+				       stats_list[iter]->weight);
+		}
+		SPDK_NOTICELOG("Tune3 going to sleep\n");
+		sleeping_time_counter = 0;
+		break;
+	case SLEEPING:
+		if (sleeping_time_counter == SLEEPING_TIME) {
+			SPDK_NOTICELOG("Tune3 getting up\n");
+			state = NOT_READY;
+		} else {
+			++sleeping_time_counter;
+		}
+		break;
+
+	default:
+		break;
+	}
+
+
+done:
+	return 0;
+}
+
+struct spdk_io_pacer_tuner3 *
+spdk_io_pacer_tuner3_create(struct spdk_io_pacer *pacer,
+			    uint32_t period_us)
+{
+	struct spdk_io_pacer_tuner3 *tuner;
+
+	assert(pacer != NULL);
+
+	tuner = (struct spdk_io_pacer_tuner3 *)calloc(1,
+						      sizeof(struct spdk_io_pacer_tuner3));
+	if (!tuner) {
+		SPDK_ERRLOG("Failed to allocate IO pacer tuner\n");
+		return NULL;
+	}
+
+	tuner->pacer = pacer;
+	tuner->period_us = period_us;
+	if (0 != period_us) {
+		tuner->poller = SPDK_POLLER_REGISTER(io_pacer_tune3,
+						     (void *)tuner, period_us);
+		if (!tuner->poller) {
+			SPDK_ERRLOG("Failed to create tuner3 poller for IO pacer\n");
+			spdk_io_pacer_tuner3_destroy(tuner);
+			return NULL;
+		}
+	}
+
+	SPDK_NOTICELOG("Created IO pacer tuner3 %p: pacer %p, period_us %lu \n",
+		       tuner,
+		       pacer,
+		       tuner->period_us);
+	return tuner;
+}
+
+void
+spdk_io_pacer_tuner3_destroy(struct spdk_io_pacer_tuner3 *tuner)
+{
+	assert(tuner != NULL);
+
+	spdk_poller_unregister(&tuner->poller);
+	free(tuner);
+	SPDK_NOTICELOG("Destroyed IO pacer tuner %p\n", tuner);
+}
+
+struct drive_stats* spdk_io_pacer_drive_stats_create(struct spdk_io_pacer_drives_stats *stats,
+								   uint64_t key,
+								   struct spdk_bdev *bdev)
+{
+	int32_t ret = 0;
+	struct drive_stats *data = NULL;
+	struct rte_hash *h = stats->h;
+
+	ret = rte_hash_lookup(h, &key);
+	if (ret != -ENOENT)
+		return 0;
+
+	drive_stats_lock(stats);
+	data = calloc(1, sizeof(struct drive_stats));
+	rte_atomic32_init(&data->ops_in_flight);
+	ret = rte_hash_add_key_data(h, (void *) &key, data);
+	if (ret < 0) {
+		SPDK_ERRLOG("Can't add key to drive statistics dict: %" PRIx64 "\n",
+			    key);
+		goto err;
+	}
+    data->bdev = bdev;
+	goto exit;
+err:
+	free(data);
+	data = NULL;
+exit:
+	drive_stats_unlock(stats);
+	return data;
+}
+
+struct drive_stats * spdk_io_pacer_drive_stats_get(struct spdk_io_pacer_drives_stats *stats,
+								 uint64_t key)
+{
+	struct drive_stats *data = NULL;
+	int ret = 0;
+	ret = rte_hash_lookup_data(stats->h, (void*) &key, (void**) &data);
+	if (unlikely(ret < 0)) {
+		SPDK_ERRLOG("Drive statistics seems broken\n");
+    }
+	return data;
+}
+
+void spdk_io_pacer_drive_stats_try_init(uint64_t key, struct spdk_bdev *bdev)
+{
+	struct drive_stats *data;
+	int ret = 0;
+
+	spdk_io_pacer_drive_stats_setup(&drives_stats, MAX_DRIVES_STATS);
+	ret = rte_hash_lookup_data(drives_stats.h, (void*) &key, (void**) &data);
+	if (unlikely(ret == -EINVAL)) {
+		SPDK_ERRLOG("Drive statistics seems broken\n");
+	} else if (unlikely(ret == -ENOENT)) {
+		SPDK_NOTICELOG("Creating drive stats for key: %" PRIx64 "\n", key);
+		data = spdk_io_pacer_drive_stats_create(&drives_stats, key, bdev);
+	}
+}
+

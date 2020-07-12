@@ -52,6 +52,7 @@ struct io_pacer_queue_entry {
 };
 
 
+#define MAX_DRIVES_STATS 256
 struct spdk_io_pacer_drives_stats {
 	struct rte_hash *h;
 	rte_spinlock_t lock;
@@ -61,6 +62,11 @@ extern struct spdk_io_pacer_drives_stats drives_stats;
 
 struct drive_stats {
 	rte_atomic32_t ops_in_flight;
+	struct spdk_bdev *bdev;
+	uint64_t read_latency_ticks;
+	uint64_t write_latency_ticks;
+	uint32_t cache_credit_in_bytes;
+	uint32_t weight;
 };
 
 typedef void (*spdk_io_pacer_pop_cb)(void *io);
@@ -88,55 +94,23 @@ struct spdk_io_pacer_tuner2 *spdk_io_pacer_tuner2_create(struct spdk_io_pacer *p
 							 uint64_t factor);
 void spdk_io_pacer_tuner2_destroy(struct spdk_io_pacer_tuner2 *tuner);
 
+struct spdk_io_pacer_tuner3 *
+spdk_io_pacer_tuner3_create(struct spdk_io_pacer *pacer,
+			    uint32_t period_us);
+void spdk_io_pacer_tuner3_destroy(struct spdk_io_pacer_tuner3 *tuner);
+
+struct drive_stats* spdk_io_pacer_drive_stats_create(struct spdk_io_pacer_drives_stats *stats,
+						     uint64_t key, struct spdk_bdev *bdev);
+struct drive_stats * spdk_io_pacer_drive_stats_get(struct spdk_io_pacer_drives_stats *stats,
+						   uint64_t key);
+void spdk_io_pacer_drive_stats_try_init(uint64_t key, struct spdk_bdev *bdev);
+
 static inline void drive_stats_lock(struct spdk_io_pacer_drives_stats *stats) {
 	rte_spinlock_lock(&stats->lock);
 }
 
 static inline void drive_stats_unlock(struct spdk_io_pacer_drives_stats *stats) {
 	rte_spinlock_unlock(&stats->lock);
-}
-
-static inline struct drive_stats* spdk_io_pacer_drive_stats_create(struct spdk_io_pacer_drives_stats *stats,
-								   uint64_t key)
-{
-	int32_t ret = 0;
-	struct drive_stats *data = NULL;
-	struct rte_hash *h = stats->h;
-
-	ret = rte_hash_lookup(h, &key);
-	if (ret != -ENOENT)
-		return 0;
-
-	drive_stats_lock(stats);
-	data = calloc(1, sizeof(struct drive_stats));
-	rte_atomic32_init(&data->ops_in_flight);
-	ret = rte_hash_add_key_data(h, (void *) &key, data);
-	if (ret < 0) {
-		SPDK_ERRLOG("Can't add key to drive statistics dict: %" PRIx64 "\n", key);
-		goto err;
-	}
-	goto exit;
-err:
-	free(data);
-	data = NULL;
-exit:
-	drive_stats_unlock(stats);
-	return data;
-}
-
-static inline struct drive_stats * spdk_io_pacer_drive_stats_get(struct spdk_io_pacer_drives_stats *stats,
-								 uint64_t key)
-{
-	struct drive_stats *data = NULL;
-	int ret = 0;
-	ret = rte_hash_lookup_data(stats->h, (void*) &key, (void**) &data);
-	if (ret == -EINVAL) {
-		SPDK_ERRLOG("Drive statistics seems broken\n");
-	} else if (unlikely(ret == -ENOENT)) {
-		SPDK_NOTICELOG("Creating drive stats for key: %" PRIx64 "\n", key);
-		data = spdk_io_pacer_drive_stats_create(stats, key);
-	}
-	return data;
 }
 
 static inline void spdk_io_pacer_drive_stats_add(struct spdk_io_pacer_drives_stats *stats,
@@ -154,7 +128,5 @@ static inline void spdk_io_pacer_drive_stats_sub(struct spdk_io_pacer_drives_sta
 	struct drive_stats *drive_stats = spdk_io_pacer_drive_stats_get(stats, key);
 	rte_atomic32_sub(&drive_stats->ops_in_flight, val);
 }
-
-void spdk_io_pacer_drive_stats_setup(struct spdk_io_pacer_drives_stats *stats, int32_t entries);
 
 #endif /* IO_PACER_H */
