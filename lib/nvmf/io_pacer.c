@@ -592,19 +592,33 @@ done:
 	free(stat);
 }
 
+static int log2fast(int v) {
+	int r; // result of log_2(v) goes here
+	union { unsigned int u[2]; double d; } t; // temp
+
+	t.u[__FLOAT_WORD_ORDER__==__ORDER_LITTLE_ENDIAN__] = 0x43300000;
+	t.u[__FLOAT_WORD_ORDER__!=__ORDER_LITTLE_ENDIAN__] = v;
+	t.d -= 4503599627370496.0;
+	r = (t.u[__FLOAT_WORD_ORDER__==__ORDER_LITTLE_ENDIAN__] >> 20) - 0x3FF;
+	return r;
+}
+
 static int
 io_pacer_tune3(void *arg)
 {
+	/*
 	struct spdk_io_pacer_tuner2 *tuner = arg;
 	struct spdk_io_pacer *pacer = tuner->pacer;
-
+	*/
 	const void *next_key;
 	void *next_data;
 	uint32_t iter = 0;
-	uint32_t found_initialized = 0;
 	uint32_t drives_count = 0;
 
 	const uint64_t total_cache_to_share = 12 * (1 << 20);
+	uint64_t rest_of_cache = 0;
+	uint32_t additional_pieces = 0;
+	uint32_t weight_unit_cost = 0;
 	uint32_t credit_bins = 2;
 	struct drive_stats *stats_list[MAX_DRIVES_STATS] = {0};
 	enum tune_state {NOT_READY, READY_TO_COLLECT, COLLECTING,
@@ -622,6 +636,7 @@ io_pacer_tune3(void *arg)
 	uint64_t max_write_latency_ticks = 0;
 	float tg = 0.;
 	uint32_t weight_total = 0;
+	
 	/* really try_to_setup */ /* FIXME rename function */
 	spdk_io_pacer_drive_stats_setup(&drives_stats, MAX_DRIVES_STATS);
 
@@ -638,9 +653,7 @@ io_pacer_tune3(void *arg)
 
 	drives_count = 0;
 	while (rte_hash_iterate(drives_stats.h, &next_key, &next_data, &iter) >= 0) {
-		struct drive_stats *stats = next_data;
-		struct spdk_bdev_io_stat *bdev_stat = NULL;
-		stats_list[drives_count] = stats;
+		stats_list[drives_count] = next_data;
 		++drives_count;
 	}
 
@@ -687,8 +700,6 @@ io_pacer_tune3(void *arg)
 		min_write_latency_ticks = max_write_latency_ticks =
 			stats_list[0]->write_latency_ticks;
 		for (iter = 0; iter < drives_count; iter++) {
-			const char *bdev_name = NULL;
-			bdev_name = spdk_bdev_get_name(stats_list[iter]->bdev);
 			if (stats_list[iter]->read_latency_ticks < min_read_latency_ticks) 
 				min_read_latency_ticks = stats_list[iter]->read_latency_ticks;
 			if (stats_list[iter]->read_latency_ticks > max_read_latency_ticks) 
@@ -697,9 +708,6 @@ io_pacer_tune3(void *arg)
 				min_write_latency_ticks = stats_list[iter]->write_latency_ticks;
 			if (stats_list[iter]->write_latency_ticks > max_write_latency_ticks) 
 				max_write_latency_ticks = stats_list[iter]->write_latency_ticks;
-			SPDK_NOTICELOG("Tune3 %s read_latency_ticks: %"PRIu64"\n",
-				       bdev_name,
-				       stats_list[iter]->read_latency_ticks);
 		}
 		state = SLEEPING;
 		SPDK_NOTICELOG("Tune3 found "
@@ -717,15 +725,43 @@ io_pacer_tune3(void *arg)
 			 (float) min_read_latency_ticks);
 
 		for (iter = 0; iter < drives_count; iter++) {
-			const char *bdev_name = NULL;
-			uint8_t bin_number = tg * (float) (stats_list[iter]->read_latency_ticks - min_read_latency_ticks);
-			stats_list[iter]->weight = credit_bins - bin_number;
+			uint8_t bin_number = tg * (float)
+				(stats_list[iter]->read_latency_ticks -
+				 min_read_latency_ticks);
+			uint8_t weight = credit_bins - bin_number;
+			stats_list[iter]->weight = (weight != 0) ? weight : 1;
 			weight_total += stats_list[iter]->weight;
+		}
+		weight_unit_cost = 1 << log2fast(total_cache_to_share / weight_total);
+		for (iter = 0; iter < drives_count; iter++) {
+			stats_list[iter]->credit = stats_list[iter]->weight *
+				                   weight_unit_cost;
+		}
+
+                rest_of_cache = total_cache_to_share - weight_unit_cost * weight_total;
+		additional_pieces  = rest_of_cache / weight_unit_cost;
+
+		iter = 0;
+		SPDK_NOTICELOG("Tune3 additional_pieces: %"PRIu32"\n",
+			       additional_pieces);
+	        while(additional_pieces) {
+			if (stats_list[iter]->weight == credit_bins) {
+				stats_list[iter]->credit += weight_unit_cost;
+				--additional_pieces;
+
+			}
+		        iter = (iter + 1) % drives_count;
+		}
+		for (iter = 0; iter < drives_count; iter++) {
+			const char *bdev_name = NULL;
 			bdev_name = spdk_bdev_get_name(stats_list[iter]->bdev);
-			SPDK_NOTICELOG("Tune3 %s read_latency_ticks: %"PRIu64" -> weight: %"PRIu8"\n",
+			SPDK_NOTICELOG("Tune3 %s read_latency_ticks: %"PRIu64
+				       ", weight: %"PRIu32
+				       ", credit: %"PRIu32"\n",
 				       bdev_name,
 				       stats_list[iter]->read_latency_ticks,
-				       stats_list[iter]->weight);
+				       stats_list[iter]->weight,
+				       stats_list[iter]->credit);
 		}
 		SPDK_NOTICELOG("Tune3 going to sleep\n");
 		sleeping_time_counter = 0;
@@ -742,8 +778,6 @@ io_pacer_tune3(void *arg)
 	default:
 		break;
 	}
-
-
 done:
 	return 0;
 }

@@ -65,7 +65,7 @@ struct drive_stats {
 	struct spdk_bdev *bdev;
 	uint64_t read_latency_ticks;
 	uint64_t write_latency_ticks;
-	uint32_t cache_credit_in_bytes;
+	uint32_t credit;
 	uint32_t weight;
 };
 
