@@ -61,7 +61,7 @@ struct spdk_io_pacer_drives_stats {
 extern struct spdk_io_pacer_drives_stats drives_stats;
 
 struct drive_stats {
-	rte_atomic32_t ops_in_flight;
+	rte_atomic32_t bytes_in_flight;
 	struct spdk_bdev *bdev;
 	uint64_t read_latency_ticks;
 	uint64_t write_latency_ticks;
@@ -118,7 +118,7 @@ static inline void spdk_io_pacer_drive_stats_add(struct spdk_io_pacer_drives_sta
 						 uint32_t val)
 {
 	struct drive_stats *drive_stats = spdk_io_pacer_drive_stats_get(stats, key);
-	rte_atomic32_add(&drive_stats->ops_in_flight, val);
+	rte_atomic32_add(&drive_stats->bytes_in_flight, val);
 }
 
 static inline void spdk_io_pacer_drive_stats_sub(struct spdk_io_pacer_drives_stats *stats,
@@ -126,7 +126,7 @@ static inline void spdk_io_pacer_drive_stats_sub(struct spdk_io_pacer_drives_sta
 						 uint32_t val)
 {
 	struct drive_stats *drive_stats = spdk_io_pacer_drive_stats_get(stats, key);
-	rte_atomic32_sub(&drive_stats->ops_in_flight, val);
+	rte_atomic32_sub(&drive_stats->bytes_in_flight, val);
 }
 
 #endif /* IO_PACER_H */

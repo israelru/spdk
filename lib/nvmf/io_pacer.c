@@ -115,7 +115,7 @@ io_pacer_poll(void *arg)
 	struct io_pacer_queue_entry *entry;
 	uint32_t next_queue = pacer->next_queue;
 	int rc = 0;
-	uint32_t ops_in_flight = 0;
+	uint32_t bytes_in_flight = 0;
 
 	const uint64_t cur_tick = spdk_get_ticks();
 	const uint64_t ticks_diff = cur_tick - pacer->last_tick;
@@ -152,8 +152,8 @@ io_pacer_poll(void *arg)
 		attempts_cnt++;
 
 		if (pacer->disk_credit) {
-			ops_in_flight = rte_atomic32_read(&pacer->queues[next_queue].stats->ops_in_flight);
-			if (ops_in_flight > pacer->disk_credit) {
+			bytes_in_flight = rte_atomic32_read(&pacer->queues[next_queue].stats->bytes_in_flight);
+			if (bytes_in_flight >= pacer->queues[next_queue].stats->credit) {
 				next_queue++;
 				continue;
 			}
@@ -167,7 +167,8 @@ io_pacer_poll(void *arg)
 			pacer->remaining_credit -= entry->size;
 			pacer->stat.ios++;
 			pacer->stat.bytes += entry->size;
-			rte_atomic32_add(&pacer->queues[next_queue - 1].stats->ops_in_flight, 1);
+			rte_atomic32_add(&pacer->queues[next_queue - 1].stats->bytes_in_flight,
+					 (uint32_t)entry->size);
 			pacer->pop_cb(entry);
 			rc++;
 			attempts_cnt = 0;
@@ -757,11 +758,13 @@ io_pacer_tune3(void *arg)
 			bdev_name = spdk_bdev_get_name(stats_list[iter]->bdev);
 			SPDK_NOTICELOG("Tune3 %s read_latency_ticks: %"PRIu64
 				       ", weight: %"PRIu32
-				       ", credit: %"PRIu32"\n",
+				       ", credit: %"PRIu32
+				       ", bytes_in_flight: %"PRIu32"\n",
 				       bdev_name,
 				       stats_list[iter]->read_latency_ticks,
 				       stats_list[iter]->weight,
-				       stats_list[iter]->credit);
+				       stats_list[iter]->credit,
+			               rte_atomic32_read(&stats_list[iter]->bytes_in_flight));
 		}
 		SPDK_NOTICELOG("Tune3 going to sleep\n");
 		sleeping_time_counter = 0;
@@ -840,14 +843,17 @@ struct drive_stats* spdk_io_pacer_drive_stats_create(struct spdk_io_pacer_drives
 
 	drive_stats_lock(stats);
 	data = calloc(1, sizeof(struct drive_stats));
-	rte_atomic32_init(&data->ops_in_flight);
+	rte_atomic32_init(&data->bytes_in_flight);
+	/* FIXME just workaround to test */
+	data->weight = 2;
+	data->credit = 131072 * 2;
+	data->bdev = bdev;
 	ret = rte_hash_add_key_data(h, (void *) &key, data);
 	if (ret < 0) {
 		SPDK_ERRLOG("Can't add key to drive statistics dict: %" PRIx64 "\n",
 			    key);
 		goto err;
 	}
-    data->bdev = bdev;
 	goto exit;
 err:
 	free(data);

@@ -2385,6 +2385,8 @@ spdk_nvmf_rdma_request_process(struct spdk_nvmf_rdma_transport *rtransport,
 					  (uintptr_t)rdma_req, (uintptr_t)rqpair->cm_id);
 
 			const uint64_t tsc = spdk_get_ticks();
+			uint64_t size = rdma_req->req.length;
+
 			rqpair->poller->stat.requests++;
 			rqpair->poller->stat.request_latency += tsc - rdma_req->receive_tsc;
 			if (rdma_req->req.length <= 16384) {
@@ -2396,8 +2398,12 @@ spdk_nvmf_rdma_request_process(struct spdk_nvmf_rdma_transport *rtransport,
 			}
 
 			nvmf_rdma_request_free(rdma_req, rtransport);
+
 			if (rdma_req->pacer_key != 0xDEADBEEF) {
-				spdk_io_pacer_drive_stats_sub(&drives_stats, rdma_req->pacer_key, 1);
+
+				spdk_io_pacer_drive_stats_sub(&drives_stats,
+							      rdma_req->pacer_key,
+							      (uint32_t)size);
 				rdma_req->pacer_key = 0xDEADBEEF;
 			}
 			break;
