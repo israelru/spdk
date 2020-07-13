@@ -577,22 +577,6 @@ _spdk_bdev_histogram_status_cb(void *cb_arg, int status)
 }
 
 
-static void
-get_iostat_cb(struct spdk_bdev *bdev,
-	      struct spdk_bdev_io_stat *stat, void *cb_arg, int rc)
-{
-	struct drive_stats *s = cb_arg;
-
-	if (rc != 0) {
-		SPDK_NOTICELOG("error: %d\n", rc);
-		goto done;
-	}
-	s->read_latency_ticks = stat->read_latency_ticks;
-	s->write_latency_ticks = stat->write_latency_ticks;
-done:
-	free(stat);
-}
-
 static int log2fast(int v) {
 	int r; // result of log_2(v) goes here
 	union { unsigned int u[2]; double d; } t; // temp
@@ -603,6 +587,25 @@ static int log2fast(int v) {
 	r = (t.u[__FLOAT_WORD_ORDER__==__ORDER_LITTLE_ENDIAN__] >> 20) - 0x3FF;
 	return r;
 }
+
+static void
+get_iostat_cb(struct spdk_bdev *bdev,
+	      struct spdk_bdev_io_stat *stat, void *cb_arg, int rc)
+{
+	struct drive_stats *s = cb_arg;
+
+	if (rc != 0) {
+		SPDK_NOTICELOG("error: %d\n", rc);
+		goto done;
+	}
+	s->read_latency_ticks = stat->num_read_ops ?
+		log2fast(stat->read_latency_ticks / stat->num_read_ops) : 0;
+	s->write_latency_ticks = stat->num_write_ops ?
+		log2fast(stat->write_latency_ticks / stat->num_write_ops) : 0;
+done:
+	free(stat);
+}
+
 
 static int
 io_pacer_tune3(void *arg)
