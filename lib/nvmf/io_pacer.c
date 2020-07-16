@@ -663,12 +663,14 @@ io_pacer_tune3(void *arg)
 
 	switch (state) {
 	case NOT_READY:
+#ifdef HAVE_HISTOGRAM_ENABLE
 		SPDK_NOTICELOG("Tune3 starting latency collection\n");
 		for (iter = 0; iter < drives_count; iter++) {
 			spdk_bdev_histogram_enable(stats_list[iter]->bdev,
 						   _spdk_bdev_histogram_status_cb,
 						   NULL, true);
 		}
+#endif
 		state = READY_TO_COLLECT;
 		break; /* TODO check if we can remove this break */
 	case READY_TO_COLLECT:
@@ -686,11 +688,13 @@ io_pacer_tune3(void *arg)
 	case COLLECTING:
 		if (collecting_time_counter == COLLECTING_TIME) {
 			SPDK_NOTICELOG("Tune3 stopping latency collection\n");
+#ifdef HAVE_HISTOGRAM_ENABLE
 			for (iter = 0; iter < drives_count; iter++) {
 				spdk_bdev_histogram_enable(stats_list[iter]->bdev,
 							   _spdk_bdev_histogram_status_cb,
 							   NULL, false);
 			}
+#endif
 			state = APPLYING;
 		} else {
 			++collecting_time_counter;

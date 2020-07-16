@@ -3724,7 +3724,8 @@ spdk_nvmf_rdma_poll_group_destroy(struct spdk_nvmf_transport_poll_group *group)
 			spdk_io_pacer_tuner_destroy(rgroup->pacer_tuner);
 		} else if (rgroup->pacer_tuner2) {
 			spdk_io_pacer_tuner2_destroy(rgroup->pacer_tuner2);
-		} else if (rgroup->pacer_tuner3) {
+		}
+		if (rgroup->pacer_tuner3) {
 			spdk_io_pacer_tuner3_destroy(rgroup->pacer_tuner3);
 		}
 
