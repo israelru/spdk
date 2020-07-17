@@ -53,6 +53,10 @@
 #define MIN_SO_SNDBUF_SIZE (2 * 1024 * 1024)
 #define IOV_BATCH_SIZE 64
 
+#ifndef MSG_ZEROCOPY
+#define MSG_ZEROCOPY 0x4000000
+#endif
+
 #if defined(SO_ZEROCOPY) && defined(MSG_ZEROCOPY)
 #define SPDK_ZEROCOPY
 #endif
