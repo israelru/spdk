@@ -88,12 +88,14 @@ struct nvme_tcp_qpair {
 	struct nvme_tcp_req			*tcp_reqs;
 
 	uint16_t				num_entries;
+	uint16_t				async_complete;
 
 	struct {
 		uint16_t host_hdgst_enable: 1;
 		uint16_t host_ddgst_enable: 1;
 		uint16_t icreq_send_ack: 1;
 		uint16_t poll_group_ctx: 1;
+		uint16_t process_comp_ctx : 1;
 		uint16_t reserved: 12;
 	} flags;
 
@@ -539,6 +541,10 @@ nvme_tcp_req_complete_safe(struct nvme_tcp_req *tcp_req)
 	assert(tcp_req->state == NVME_TCP_REQ_ACTIVE);
 	assert(tcp_req->tqpair != NULL);
 	assert(tcp_req->req != NULL);
+
+	if (!tcp_req->tqpair->flags.process_comp_ctx) {
+		tcp_req->tqpair->async_complete++;
+	}
 
 	TAILQ_REMOVE(&tcp_req->tqpair->outstanding_reqs, tcp_req, link);
 	nvme_complete_request(tcp_req->req->cb_fn, tcp_req->req->cb_arg, tcp_req->req->qpair, tcp_req->req,
@@ -1434,7 +1440,8 @@ nvme_tcp_read_pdu(struct nvme_tcp_qpair *tqpair, uint32_t *reaped)
 				}
 				pdu->ch_valid_bytes += rc;
 				if (pdu->ch_valid_bytes < sizeof(struct spdk_nvme_tcp_common_pdu_hdr)) {
-					return NVME_TCP_PDU_IN_PROGRESS;
+					rc =  NVME_TCP_PDU_IN_PROGRESS;
+					goto out;
 				}
 			}
 
@@ -1454,7 +1461,8 @@ nvme_tcp_read_pdu(struct nvme_tcp_qpair *tqpair, uint32_t *reaped)
 
 			pdu->psh_valid_bytes += rc;
 			if (pdu->psh_valid_bytes < pdu->psh_len) {
-				return NVME_TCP_PDU_IN_PROGRESS;
+				rc =  NVME_TCP_PDU_IN_PROGRESS;
+				goto out;
 			}
 
 			/* All header(ch, psh, head digist) of this PDU has now been read from the socket. */
@@ -1464,7 +1472,8 @@ nvme_tcp_read_pdu(struct nvme_tcp_qpair *tqpair, uint32_t *reaped)
 			pdu = &tqpair->recv_pdu;
 			/* check whether the data is valid, if not we just return */
 			if (!pdu->data_len) {
-				return NVME_TCP_PDU_IN_PROGRESS;
+				rc = NVME_TCP_PDU_IN_PROGRESS;
+				goto out;
 			}
 
 			data_len = pdu->data_len;
@@ -1483,7 +1492,8 @@ nvme_tcp_read_pdu(struct nvme_tcp_qpair *tqpair, uint32_t *reaped)
 
 			pdu->readv_offset += rc;
 			if (pdu->readv_offset < data_len) {
-				return NVME_TCP_PDU_IN_PROGRESS;
+				rc =  NVME_TCP_PDU_IN_PROGRESS;
+				goto out;
 			}
 
 			assert(pdu->readv_offset == data_len);
@@ -1498,6 +1508,10 @@ nvme_tcp_read_pdu(struct nvme_tcp_qpair *tqpair, uint32_t *reaped)
 			break;
 		}
 	} while (prev_state != tqpair->recv_state);
+
+out:
+	*reaped += tqpair->async_complete;
+	tqpair->async_complete = 0;
 
 	return rc;
 }
@@ -1558,6 +1572,8 @@ nvme_tcp_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_c
 				dummy_disconnected_qpair_cb);
 	}
 
+	tqpair->flags.process_comp_ctx = 1;
+
 	rc = spdk_sock_flush(tqpair->sock);
 	if (rc < 0) {
 		return rc;
@@ -1586,6 +1602,8 @@ nvme_tcp_qpair_process_completions(struct spdk_nvme_qpair *qpair, uint32_t max_c
 	if (spdk_unlikely(tqpair->qpair.ctrlr->timeout_enabled)) {
 		nvme_tcp_qpair_check_timeout(qpair);
 	}
+
+	tqpair->flags.process_comp_ctx = 0;
 
 	return reaped;
 fail:
