@@ -56,6 +56,7 @@ struct spdk_io_pacer_drives_stats drives_stats = {0};
 struct io_pacer_queue {
 	uint64_t key;
 	struct drive_stats *stats;
+	uint32_t counter;
 	STAILQ_HEAD(, io_pacer_queue_entry) queue;
 };
 
@@ -151,11 +152,13 @@ io_pacer_poll(void *arg)
 		next_queue %= pacer->num_queues;
 		attempts_cnt++;
 
-		if (pacer->disk_credit) {
-			bytes_in_flight = rte_atomic32_read(&pacer->queues[next_queue].stats->bytes_in_flight);
-			if (bytes_in_flight >= pacer->queues[next_queue].stats->credit) {
+		if (pacer->disk_credit && pacer->queues[next_queue].stats->weight !=1 ) {
+			uint32_t bdev_weight = pacer->queues[next_queue].stats->weight;
+			if (--pacer->queues[next_queue].counter != 0) {
 				next_queue++;
 				continue;
+			} else {
+				pacer->queues[next_queue].counter = bdev_weight;
 			}
 		}
 		entry = STAILQ_FIRST(&pacer->queues[next_queue].queue);
@@ -306,6 +309,7 @@ spdk_io_pacer_create_queue(struct spdk_io_pacer *pacer, uint64_t key)
 	pacer->queues[pacer->num_queues].key = key;
 	STAILQ_INIT(&pacer->queues[pacer->num_queues].queue);
 	pacer->queues[pacer->num_queues].stats = spdk_io_pacer_drive_stats_get(&drives_stats, key);
+	pacer->queues[pacer->num_queues].counter = pacer->queues[pacer->num_queues].stats->weight;
 	pacer->num_queues++;
 	SPDK_NOTICELOG("Created IO pacer queue: pacer %p, key %016lx\n",
 		       pacer, key);
@@ -599,13 +603,23 @@ get_iostat_cb(struct spdk_bdev *bdev,
 		goto done;
 	}
 	s->read_latency_ticks = stat->num_read_ops ?
-		log2fast(stat->read_latency_ticks / stat->num_read_ops) : 0;
+		stat->read_latency_ticks / stat->num_read_ops : 0;
 	s->write_latency_ticks = stat->num_write_ops ?
-		log2fast(stat->write_latency_ticks / stat->num_write_ops) : 0;
+		stat->write_latency_ticks / stat->num_write_ops : 0;
 done:
 	free(stat);
 }
 
+
+static inline float rate(float scale, float x1, float x2)
+{
+	return (scale * x2/x1 - 1.0)/(x2-x1);
+}
+
+static inline float shift(float rate, float x1)
+{
+	return 1.0 - rate*x1;
+}
 
 static int
 io_pacer_tune3(void *arg)
@@ -619,7 +633,7 @@ io_pacer_tune3(void *arg)
 	uint32_t iter = 0;
 	uint32_t drives_count = 0;
 
-	const uint64_t total_cache_to_share = 12 * (1 << 20);
+	const uint64_t total_cache_to_share = 12 * (1 << 20) >> 1;
 	uint64_t rest_of_cache = 0;
 	uint32_t additional_pieces = 0;
 	uint32_t weight_unit_cost = 0;
@@ -630,7 +644,7 @@ io_pacer_tune3(void *arg)
 
 	static __thread enum tune_state state = NOT_READY;
 	const uint64_t COLLECTING_TIME = 10;
-	const uint64_t SLEEPING_TIME = 500;
+	const uint64_t SLEEPING_TIME = 50;
 	static __thread uint64_t collecting_time_counter = 0;
 	static __thread uint64_t sleeping_time_counter = 0;
 
@@ -728,6 +742,7 @@ io_pacer_tune3(void *arg)
 			       min_write_latency_ticks,
 			       max_write_latency_ticks);
 
+#if 0
 		tg = (float) credit_bins /
 			((float) max_read_latency_ticks -
 			 (float) min_read_latency_ticks);
@@ -738,7 +753,7 @@ io_pacer_tune3(void *arg)
 				 min_read_latency_ticks);
 			uint8_t weight = credit_bins - bin_number;
 			stats_list[iter]->weight = (weight != 0) ? weight : 1;
-			weight_total += stats_list[iter]->weight;
+			weight_total += (stats_list[iter]->weight) == 1 ? 1 : 0;
 		}
 		weight_unit_cost = 1 << log2fast(total_cache_to_share / weight_total);
 		for (iter = 0; iter < drives_count; iter++) {
@@ -760,6 +775,16 @@ io_pacer_tune3(void *arg)
 			}
 		        iter = (iter + 1) % drives_count;
 		}
+#endif
+		tg = rate(pacer->disk_credit, min_read_latency_ticks,
+			  max_read_latency_ticks);
+		b = shift(tg, min_read_latency_ticks);
+
+		for (iter = 0; iter < drives_count; iter++) {
+			stats_list[iter]->weight = tg *
+				(float) stats_list[iter]->read_latency_ticks + shift
+		}
+
 		for (iter = 0; iter < drives_count; iter++) {
 			const char *bdev_name = NULL;
 			bdev_name = spdk_bdev_get_name(stats_list[iter]->bdev);
@@ -770,7 +795,6 @@ io_pacer_tune3(void *arg)
 				       bdev_name,
 				       stats_list[iter]->read_latency_ticks,
 				       stats_list[iter]->weight,
-				       stats_list[iter]->credit,
 			               rte_atomic32_read(&stats_list[iter]->bytes_in_flight));
 		}
 		SPDK_NOTICELOG("Tune3 going to sleep\n");
@@ -852,8 +876,8 @@ struct drive_stats* spdk_io_pacer_drive_stats_create(struct spdk_io_pacer_drives
 	data = calloc(1, sizeof(struct drive_stats));
 	rte_atomic32_init(&data->bytes_in_flight);
 	/* FIXME just workaround to test */
-	data->weight = 2;
-	data->credit = 131072 * 2;
+	data->weight = 1;
+	/* FIXME end of workaround */
 	data->bdev = bdev;
 	ret = rte_hash_add_key_data(h, (void *) &key, data);
 	if (ret < 0) {
