@@ -837,6 +837,7 @@ Pacer manages bdevs according their weights. So bdev with the weight 1 will be m
 3 will be managed only once per 3 pacer iterations.
 Weights are distributed lineary according bdevs latencies relations. See pic.
 
+![Weight calculation idea](./scales.png)
 
 | P  | Num delay bdevs | BW    | BW Max | WIRE BW  | AVG LAT, us | BW STDDEV | L3 Hit Rate | Bufs in-flight (MiB) | Pacer period, us |
 |----|-----------------|-------|--------|----------|-------------|-----------|-------------|----------------------|------------------|
