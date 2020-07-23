@@ -1703,9 +1703,12 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
                                        io_pacer_period=args.io_pacer_period,
                                        io_pacer_credit=args.io_pacer_credit,
                                        io_pacer_threshold=args.io_pacer_threshold,
+                                       io_pacer_disk_credit=args.io_pacer_disk_credit,
+                                       io_pacer_tuner_type=args.io_pacer_tuner_type,
                                        io_pacer_tuner_period=args.io_pacer_tuner_period,
                                        io_pacer_tuner_step=args.io_pacer_tuner_step,
-                                       io_pacer_disk_credit=args.io_pacer_disk_credit)
+                                       io_pacer_tuner_threshold=args.io_pacer_tuner_threshold,
+                                       io_pacer_tuner_factor=args.io_pacer_tuner_factor)
 
     p = subparsers.add_parser('nvmf_create_transport', help='Create NVMf transport')
     p.add_argument('-t', '--trtype', help='Transport type (ex. RDMA)', type=str, required=True)
@@ -1726,9 +1729,12 @@ Format: 'user:u1 secret:s1 muser:mu1 msecret:ms1,user:u2 secret:s2 muser:mu2 mse
     p.add_argument('-d', '--io-pacer-period', help='IO pacer period, ns. (0 - no IO pacing). RDMA transport only.', type=int)
     p.add_argument('--io-pacer-credit', help='IO pacer credit, bytes. Must be at least max IO size. RDMA transport only.', type=int)
     p.add_argument('--io-pacer-threshold', help='IO pacer threshold, bytes. IO sizes less or equal to threshold will bypass IO pacer. RDMA transport only.', type=int)
+    p.add_argument('--io-pacer-disk-credit', help='IO pacer disk credit. RDMA transport only.', type=int)
+    p.add_argument('--io-pacer-tuner-type', help='IO pacer tuner type: 0 - bandwidth based, 1 - buffers based. RDMA transport only.', type=int)
     p.add_argument('--io-pacer-tuner-period', help='IO pacer tuner period, us. . RDMA transport only.', type=int)
     p.add_argument('--io-pacer-tuner-step', help='IO pacer tuner step,ns. RDMA transport only.', type=int)
-    p.add_argument('--io-pacer-disk-credit', help='IO pacer disk credit. RDMA transport only.', type=int)
+    p.add_argument('--io-pacer-tuner-threshold', help='IO pacer tuner threshold. . RDMA transport only.', type=int)
+    p.add_argument('--io-pacer-tuner-factor', help='IO pacer tuner factor. RDMA transport only.', type=int)
     p.set_defaults(func=nvmf_create_transport)
 
     def nvmf_get_transports(args):

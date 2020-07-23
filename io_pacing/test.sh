@@ -11,7 +11,7 @@ KERNEL_DRIVER=${KERNEL_DRIVER-0}
 
 # Test setup configuration
 if [ "1" == "$SETUP" ]; then
-    HOSTS="r-dcs79 spdk03.swx.labs.mlnx"
+    HOSTS="spdk08.swx.labs.mlnx spdk03.swx.labs.mlnx"
     TARGET="ubuntu@spdk-tgt-bw-03"
     TARGET_ADDRS="1.1.103.1 2.2.103.1"
     TARGET_SPDK_PATH="/home/evgeniik/spdk"
@@ -354,6 +354,8 @@ function config_null_1()
     IO_PACER_THRESHOLD=${IO_PACER_THRESHOLD-0}
     IO_PACER_TUNER_PERIOD=${IO_PACER_TUNER_PERIOD-10000}
     IO_PACER_TUNER_STEP=${IO_PACER_TUNER_STEP-1000}
+    IO_PACER_TUNER_THRESHOLD=${IO_PACER_TUNER_THRESHOLD-12582912}
+    IO_PACER_TUNER_FACTOR=${IO_PACER_TUNER_FACTOR-1}
     IO_UNIT_SIZE=${IO_UNIT_SIZE-131072}
     IO_PACER_DISK_CREDIT=${IO_PACER_DISK_CREDIT-0}
     IN_CAPSULE_DATA=${IN_CAPSULE_DATA-0}
@@ -376,6 +378,8 @@ function config_null_1()
 	     --io-pacer-threshold $IO_PACER_THRESHOLD \
 	     --io-pacer-tuner-period $IO_PACER_TUNER_PERIOD \
 	     --io-pacer-tuner-step $IO_PACER_TUNER_STEP \
+	     --io-pacer-tuner-threshold $IO_PACER_TUNER_THRESHOLD \
+	     --io-pacer-tuner-factor $IO_PACER_TUNER_FACTOR \
 	     --io-pacer-disk-credit $IO_PACER_DISK_CREDIT
     rpc_send nvmf_create_subsystem --allow-any-host \
 	     --max-namespaces 48 \
@@ -404,6 +408,8 @@ function config_null_16()
     IO_PACER_THRESHOLD=${IO_PACER_THRESHOLD-0}
     IO_PACER_TUNER_PERIOD=${IO_PACER_TUNER_PERIOD-10000}
     IO_PACER_TUNER_STEP=${IO_PACER_TUNER_STEP-1000}
+    IO_PACER_TUNER_THRESHOLD=${IO_PACER_TUNER_THRESHOLD-12582912}
+    IO_PACER_TUNER_FACTOR=${IO_PACER_TUNER_FACTOR-1}
     IO_UNIT_SIZE=${IO_UNIT_SIZE-131072}
     IO_PACER_DISK_CREDIT=${IO_PACER_DISK_CREDIT-0}
     IN_CAPSULE_DATA=${IN_CAPSULE_DATA-0}
@@ -426,6 +432,8 @@ function config_null_16()
 	     --io-pacer-threshold $IO_PACER_THRESHOLD \
 	     --io-pacer-tuner-period $IO_PACER_TUNER_PERIOD \
 	     --io-pacer-tuner-step $IO_PACER_TUNER_STEP \
+	     --io-pacer-tuner-threshold $IO_PACER_TUNER_THRESHOLD \
+	     --io-pacer-tuner-factor $IO_PACER_TUNER_FACTOR \
 	     --io-pacer-disk-credit $IO_PACER_DISK_CREDIT
     rpc_send nvmf_create_subsystem --allow-any-host \
 	     --max-namespaces 48 \
@@ -456,6 +464,8 @@ function config_nvme()
     IO_PACER_THRESHOLD=${IO_PACER_THRESHOLD-0}
     IO_PACER_TUNER_PERIOD=${IO_PACER_TUNER_PERIOD-10000}
     IO_PACER_TUNER_STEP=${IO_PACER_TUNER_STEP-1000}
+    IO_PACER_TUNER_THRESHOLD=${IO_PACER_TUNER_THRESHOLD-12582912}
+    IO_PACER_TUNER_FACTOR=${IO_PACER_TUNER_FACTOR-1}
     IO_UNIT_SIZE=${IO_UNIT_SIZE-131072}
     IO_PACER_DISK_CREDIT=${IO_PACER_DISK_CREDIT-0}
     IN_CAPSULE_DATA=${IN_CAPSULE_DATA-0}
@@ -479,6 +489,8 @@ function config_nvme()
 	     --io-pacer-threshold $IO_PACER_THRESHOLD \
 	     --io-pacer-tuner-period $IO_PACER_TUNER_PERIOD \
 	     --io-pacer-tuner-step $IO_PACER_TUNER_STEP \
+	     --io-pacer-tuner-threshold $IO_PACER_TUNER_THRESHOLD \
+	     --io-pacer-tuner-factor $IO_PACER_TUNER_FACTOR \
 	     --io-pacer-disk-credit $IO_PACER_DISK_CREDIT
     rpc_send nvmf_create_subsystem --allow-any-host \
 	     --max-namespaces 48 \
@@ -514,6 +526,8 @@ function config_nvme_split3_delay()
     IO_PACER_CREDIT=${IO_PACER_CREDIT-131072}
     IO_PACER_TUNER_PERIOD=${IO_PACER_TUNER_PERIOD-10000}
     IO_PACER_TUNER_STEP=${IO_PACER_TUNER_STEP-1000}
+    IO_PACER_TUNER_THRESHOLD=${IO_PACER_TUNER_THRESHOLD-12582912}
+    IO_PACER_TUNER_FACTOR=${IO_PACER_TUNER_FACTOR-1}
     IO_UNIT_SIZE=${IO_UNIT_SIZE-131072}
     IO_PACER_DISK_CREDIT=${IO_PACER_DISK_CREDIT-0}
     IN_CAPSULE_DATA=${IN_CAPSULE_DATA-0}
@@ -537,6 +551,8 @@ function config_nvme_split3_delay()
 	     --io-pacer-threshold $IO_PACER_THRESHOLD \
 	     --io-pacer-tuner-period $IO_PACER_TUNER_PERIOD \
 	     --io-pacer-tuner-step $IO_PACER_TUNER_STEP \
+	     --io-pacer-tuner-threshold $IO_PACER_TUNER_THRESHOLD \
+	     --io-pacer-tuner-factor $IO_PACER_TUNER_FACTOR \
 	     --io-pacer-disk-credit $IO_PACER_DISK_CREDIT
     rpc_send nvmf_create_subsystem --allow-any-host \
 	     --max-namespaces 48 \
@@ -1241,27 +1257,56 @@ function test_14()
     done
 }
 
+function test_14_16_cores()
+{
+    local TGT_CPU_MASK=0xFFFF
+    local NUM_CORES=16
+
+    for io_pacer in 2800 2875 3000; do
+#    for io_pacer in 2875; do
+	ADJUSTED_PERIOD="$(M_SCALE=0 m $io_pacer*$NUM_CORES/1)"
+	num_buffers=131072
+	buf_cache=$((num_buffers/NUM_CORES))
+	echo "CPU mask $CPU_MASK, num cores $NUM_CORES, IO pacer period $io_pacer, adjusted period $ADJUSTED_PERIOD, num buffers $num_buffers, buf cache $buf_cache"
+
+	CONFIG=config_nvme \
+	      TGT_CPU_MASK=$TGT_CPU_MASK \
+	      FIO_JOB=fio-16ns-16jobs \
+	      NUM_SHARED_BUFFERS=$num_buffers \
+	      BUF_CACHE_SIZE=$buf_cache \
+	      IO_UNIT_SIZE=8192 \
+	      BUFFER_SIZE=8192 \
+	      QD_LIST="256" \
+	      IO_SIZE=128k \
+	      IO_PACER_PERIOD=$ADJUSTED_PERIOD \
+	      IO_PACER_CREDIT=65536 \
+	      test_base
+	sleep 3
+    done
+}
+
 function test_14_4k()
 {
     local TGT_CPU_MASK=0xFFFF
     local NUM_CORES=16
 
-    for io_pacer in 1400 1425 1437 1450 1500; do
-#    for io_pacer in 5600 5650 5700 5750 5800 6000; do
-#    for io_pacer in 170 180 190; do
+    for io_pacer in 2875; do
 	ADJUSTED_PERIOD="$(M_SCALE=0 m $io_pacer*$NUM_CORES/1)"
-	echo "CPU mask $CPU_MASK, num cores $NUM_CORES, IO pacer period $io_pacer, adjusted period $ADJUSTED_PERIOD"
+	num_buffers=131072
+	buf_cache=$((num_buffers/NUM_CORES))
+	echo "CPU mask $TGT_CPU_MASK, num cores $NUM_CORES, IO pacer period $io_pacer, adjusted period $ADJUSTED_PERIOD, num buffers $num_buffers, buf cache $buf_cache"
 	CONFIG=config_nvme \
 	      TGT_CPU_MASK=$TGT_CPU_MASK \
 	      FIO_JOB=fio-16ns-16jobs \
-	      NUM_SHARED_BUFFERS=32768 \
-	      BUF_CACHE_SIZE=1024 \
+	      NUM_SHARED_BUFFERS=$num_buffers \
+	      BUF_CACHE_SIZE=$buf_cache \
 	      IO_UNIT_SIZE=8192 \
-	      QD_LIST="256 1024 2048" \
+	      QD_LIST="256 2048" \
 	      IO_SIZE=4k \
 	      BUFFER_SIZE=4096 \
 	      IO_PACER_PERIOD=$ADJUSTED_PERIOD \
-	      IO_PACER_CREDIT=32768 \
+	      IO_PACER_CREDIT=65536 \
+	      IO_PACER_TUNER_PERIOD=0 \
 	      test_base
 	sleep 3
     done
@@ -1272,23 +1317,22 @@ function test_14_8k()
     local TGT_CPU_MASK=0xFFFF
     local NUM_CORES=16
 
-#    for io_pacer in 5600 5650 5700 5750 5800 6000; do
-#    for io_pacer in 330 350 380; do
-#    for io_pacer in 1400 1425 1437 1450 1500; do
-    for io_pacer in 1450; do
+    for io_pacer in 2875; do
 	ADJUSTED_PERIOD="$(M_SCALE=0 m $io_pacer*$NUM_CORES/1)"
-	echo "CPU mask $CPU_MASK, num cores $NUM_CORES, IO pacer period $io_pacer, adjusted period $ADJUSTED_PERIOD"
+	num_buffers=131072
+	buf_cache=$((num_buffers/NUM_CORES))
+	echo "CPU mask $CPU_MASK, num cores $NUM_CORES, IO pacer period $io_pacer, adjusted period $ADJUSTED_PERIOD, num buffers $num_buffers, buf cache $buf_cache"
 	CONFIG=config_nvme \
 	      TGT_CPU_MASK=$TGT_CPU_MASK \
 	      FIO_JOB=fio-16ns-16jobs \
-	      NUM_SHARED_BUFFERS=32768 \
-	      BUF_CACHE_SIZE=1024 \
+	      NUM_SHARED_BUFFERS=$num_buffers \
+	      BUF_CACHE_SIZE=$buf_cache \
 	      IO_UNIT_SIZE=8192 \
-	      QD_LIST="1024" \
+	      QD_LIST="256 2048" \
 	      IO_SIZE=8k \
 	      BUFFER_SIZE=8192 \
 	      IO_PACER_PERIOD=$ADJUSTED_PERIOD \
-	      IO_PACER_CREDIT=32768 \
+	      IO_PACER_CREDIT=65536 \
 	      test_base
 	sleep 3
     done
@@ -1298,19 +1342,18 @@ function test_14_16k()
     local TGT_CPU_MASK=0xFFFF
     local NUM_CORES=16
 
-#    for io_pacer in 5600 5650 5700 5750 5800 6000; do
-
-    for io_pacer in 1400 1425 1437 1450 1500; do
-#    for io_pacer in 750 770 800; do
+    for io_pacer in 1425 1500; do
 	ADJUSTED_PERIOD="$(M_SCALE=0 m $io_pacer*$NUM_CORES/1)"
-	echo "CPU mask $CPU_MASK, num cores $NUM_CORES, IO pacer period $io_pacer, adjusted period $ADJUSTED_PERIOD"
+	num_buffers=131072
+	buf_cache=$((num_buffers/NUM_CORES))
+	echo "CPU mask $CPU_MASK, num cores $NUM_CORES, IO pacer period $io_pacer, adjusted period $ADJUSTED_PERIOD, num buffers $num_buffers, buf cache $buf_cache"
 	CONFIG=config_nvme \
 	      TGT_CPU_MASK=$TGT_CPU_MASK \
 	      FIO_JOB=fio-16ns-16jobs \
-	      NUM_SHARED_BUFFERS=32768 \
-	      BUF_CACHE_SIZE=1024 \
+	      NUM_SHARED_BUFFERS=$num_buffers \
+	      BUF_CACHE_SIZE=$buf_cache \
 	      IO_UNIT_SIZE=8192 \
-	      QD_LIST="64 256 512" \
+	      QD_LIST="128 1024" \
 	      IO_SIZE=16k \
 	      BUFFER_SIZE=8192 \
 	      IO_PACER_PERIOD=$ADJUSTED_PERIOD \
@@ -1397,9 +1440,17 @@ function test_18()
     local TGT_CPU_MASK=0xFFFF
     local NUM_CORES=16
 
-    for io_pacer in 2875; do
+    for io_pacer in 0 2875; do
 	for threshold in 0 16384; do
-	    for io_size in "128k" "4k" "128k/80:4k/20" "128k/20:4k/80" "8k" "128k/80:8k/20" "128k/20:8k/80" "16k" "128k/80:16k/20" "128k/20:16k/80"; do
+	    if [ "0" -eq "$io_pacer" -a "0" -ne "$threshold" ]; then
+		continue
+	    fi
+
+#	    for io_size in "128k" "4k" "128k/80:4k/20" "128k/20:4k/80" "8k" "128k/80:8k/20" "128k/20:8k/80" "16k" "128k/80:16k/20" "128k/20:16k/80"; do
+	    for io_size in "128k" "4k" "128k/80:4k/20" "128k/20:4k/80" "128k/3:4k/97"; do
+#	    for io_size in "8k" "128k/80:8k/20" "128k/20:8k/80" "128k/3:8k/97"; do
+#	    for io_size in "128k/80:4k/20"; do
+		local factor=3
 		ADJUSTED_PERIOD="$(M_SCALE=0 m $io_pacer*$NUM_CORES/1)"
 		num_buffers=131072
 		buf_cache=$((num_buffers/NUM_CORES))
@@ -1410,12 +1461,14 @@ function test_18()
 		      NUM_SHARED_BUFFERS=$num_buffers \
 		      BUF_CACHE_SIZE=$buf_cache \
 		      IO_UNIT_SIZE=8192 \
-		      QD_LIST="32 64 128 256" \
+		      QD_LIST="16 32 256" \
 		      IO_SIZE="$io_size" \
 		      BUFFER_SIZE=8192 \
 		      IO_PACER_PERIOD=$ADJUSTED_PERIOD \
 		      IO_PACER_CREDIT=65536 \
 		      IO_PACER_THRESHOLD=$threshold \
+		      IO_PACER_TUNER_FACTOR=$factor \
+		      IN_CAPSULE_DATA=4096 \
 		      test_base
 		sleep 3
 	    done

@@ -484,8 +484,10 @@ struct spdk_nvmf_rdma_poll_group {
 	TAILQ_HEAD(, spdk_nvmf_rdma_poller)		pollers;
 	TAILQ_ENTRY(spdk_nvmf_rdma_poll_group)		link;
 	struct spdk_io_pacer				*pacer;
-	struct spdk_io_pacer_tuner			*pacer_tuner;
-	struct spdk_io_pacer_tuner2			*pacer_tuner2;
+	union {
+		struct spdk_io_pacer_tuner			*pacer_tuner;
+		struct spdk_io_pacer_tuner2			*pacer_tuner2;
+	};
 	/*
 	 * buffers which are split across multiple RDMA
 	 * memory regions cannot be used by this transport.
@@ -2095,6 +2097,7 @@ spdk_nvmf_rdma_request_process(struct spdk_nvmf_rdma_transport *rtransport,
 	bool				progress = false;
 	int				data_posted;
 	uint32_t			num_blocks;
+	struct spdk_nvme_sgl_descriptor *sgl;
 
 	rqpair = SPDK_CONTAINEROF(rdma_req->req.qpair, struct spdk_nvmf_rdma_qpair, qpair);
 	device = rqpair->device;
@@ -2163,7 +2166,11 @@ spdk_nvmf_rdma_request_process(struct spdk_nvmf_rdma_transport *rtransport,
 			break;
 
 		case RDMA_REQUEST_STATE_IO_PACING:
+			sgl = &rdma_req->req.cmd->nvme_cmd.dptr.sgl1;
+
 			if ((rgroup->pacer == NULL) ||
+			    (sgl->generic.type == SPDK_NVME_SGL_TYPE_DATA_BLOCK &&
+			     sgl->unkeyed.subtype == SPDK_NVME_SGL_SUBTYPE_OFFSET) ||
 			    spdk_unlikely(spdk_nvmf_qpair_is_admin_queue(&rqpair->qpair)) ||
 			    spdk_unlikely(rdma_req->req.cmd->nvmf_cmd.opcode == SPDK_NVME_OPC_FABRIC)) {
 				rdma_req->state = RDMA_REQUEST_STATE_NEED_BUFFER;
@@ -2218,6 +2225,11 @@ spdk_nvmf_rdma_request_process(struct spdk_nvmf_rdma_transport *rtransport,
 			}
 
 			STAILQ_REMOVE_HEAD(&rgroup->group.pending_buf_queue, buf_link);
+
+
+			if (rgroup->pacer_tuner2 && (rtransport->transport.opts.io_pacer_tuner_type == 1)) {
+				spdk_io_pacer_tuner2_add(rgroup->pacer_tuner2, rdma_req->req.length);
+			}
 
 			/* If data is transferring from host to controller and the data didn't
 			 * arrive using in capsule data, we need to do a transfer from the host.
@@ -2393,7 +2405,13 @@ spdk_nvmf_rdma_request_process(struct spdk_nvmf_rdma_transport *rtransport,
 				rqpair->poller->stat.request_latency_large += tsc - rdma_req->receive_tsc;
 			}
 
+			if (rgroup->pacer_tuner2 &&
+			    (rtransport->transport.opts.io_pacer_tuner_type == 1)) {
+				spdk_io_pacer_tuner2_sub(rgroup->pacer_tuner2, rdma_req->req.length);
+			}
+
 			nvmf_rdma_request_free(rdma_req, rtransport);
+
 			if (rdma_req->pacer_key != 0xDEADBEEF) {
 				spdk_io_pacer_drive_stats_sub(&drives_stats, rdma_req->pacer_key, 1);
 				rdma_req->pacer_key = 0xDEADBEEF;
@@ -2428,10 +2446,11 @@ spdk_nvmf_rdma_request_process(struct spdk_nvmf_rdma_transport *rtransport,
 #define SPDK_NVMF_RDMA_DIF_INSERT_OR_STRIP false
 #define SPDK_NVMF_RDMA_DEFAULT_IO_PACER_PERIOD 0
 #define SPDK_NVMF_RDMA_DEFAULT_IO_PACER_THRESHOLD 0
+#define SPDK_NVMF_RDMA_DEFAULT_IO_PACER_TUNER_TYPE 1 /* Buffers based tuner */
 #define SPDK_NVMF_RDMA_DEFAULT_IO_PACER_TUNER_PERIOD 10000 /* us */
 #define SPDK_NVMF_RDMA_DEFAULT_IO_PACER_TUNER_STEP 1000 /* ns */
 #define SPDK_NVMF_RDMA_DEFAULT_IO_PACER_TUNER_THRESHOLD 12*1024*1024
-#define SPDK_NVMF_RDMA_DEFAULT_IO_PACER_TUNER_FACTOR 150
+#define SPDK_NVMF_RDMA_DEFAULT_IO_PACER_TUNER_FACTOR 1
 #define SPDK_NVMF_RDMA_DEFAULT_IO_PACER_DISK_CREDIT 0 /* operations per disk in flight */
 
 static void
@@ -2450,6 +2469,7 @@ spdk_nvmf_rdma_opts_init(struct spdk_nvmf_transport_opts *opts)
 	opts->dif_insert_or_strip =	SPDK_NVMF_RDMA_DIF_INSERT_OR_STRIP;
 	opts->io_pacer_period = SPDK_NVMF_RDMA_DEFAULT_IO_PACER_PERIOD;
 	opts->io_pacer_threshold = SPDK_NVMF_RDMA_DEFAULT_IO_PACER_THRESHOLD;
+	opts->io_pacer_tuner_type = SPDK_NVMF_RDMA_DEFAULT_IO_PACER_TUNER_TYPE;
 	opts->io_pacer_tuner_period = SPDK_NVMF_RDMA_DEFAULT_IO_PACER_TUNER_PERIOD;
 	opts->io_pacer_tuner_step = SPDK_NVMF_RDMA_DEFAULT_IO_PACER_TUNER_STEP;
 	opts->io_pacer_tuner_threshold = SPDK_NVMF_RDMA_DEFAULT_IO_PACER_TUNER_THRESHOLD;
@@ -3548,31 +3568,30 @@ spdk_nvmf_rdma_poll_group_create(struct spdk_nvmf_transport *transport)
 			pthread_mutex_unlock(&rtransport->lock);
 			return NULL;
 		}
-#if 0
-		rgroup->pacer_tuner = spdk_io_pacer_tuner_create(rgroup->pacer,
-								 transport->opts.io_pacer_tuner_period,
-								 transport->opts.io_pacer_tuner_step);
-		if (!rgroup->pacer_tuner) {
-			SPDK_ERRLOG("Failed to create IO pacer tuner\n");
-			spdk_nvmf_rdma_poll_group_destroy(&rgroup->group);
-			pthread_mutex_unlock(&rtransport->lock);
-			return NULL;
+
+		if (transport->opts.io_pacer_tuner_type == 0) {
+			rgroup->pacer_tuner = spdk_io_pacer_tuner_create(rgroup->pacer,
+									 transport->opts.io_pacer_tuner_period,
+									 transport->opts.io_pacer_tuner_step);
+			if (!rgroup->pacer_tuner) {
+				SPDK_ERRLOG("Failed to create IO pacer tuner\n");
+				spdk_nvmf_rdma_poll_group_destroy(&rgroup->group);
+				pthread_mutex_unlock(&rtransport->lock);
+				return NULL;
+			}
+		} else {
+			rgroup->pacer_tuner2 = spdk_io_pacer_tuner2_create(rgroup->pacer,
+									   transport->opts.io_pacer_tuner_period,
+									   transport->opts.io_pacer_tuner_threshold /
+									   spdk_env_get_core_count(),
+									   transport->opts.io_pacer_tuner_factor);
+			if (!rgroup->pacer_tuner2) {
+				SPDK_ERRLOG("Failed to create IO pacer tuner\n");
+				spdk_nvmf_rdma_poll_group_destroy(&rgroup->group);
+				pthread_mutex_unlock(&rtransport->lock);
+				return NULL;
+			}
 		}
-#else
-		rgroup->pacer_tuner2 = spdk_io_pacer_tuner2_create(rgroup->pacer,
-								   transport->opts.io_pacer_tuner_period,
-								   &rgroup->group.buffers_allocated,
-								   transport->opts.io_pacer_tuner_threshold /
-								   transport->opts.io_unit_size /
-								   spdk_env_get_core_count(),
-								   transport->opts.io_pacer_tuner_factor);
-		if (!rgroup->pacer_tuner2) {
-			SPDK_ERRLOG("Failed to create IO pacer tuner\n");
-			spdk_nvmf_rdma_poll_group_destroy(&rgroup->group);
-			pthread_mutex_unlock(&rtransport->lock);
-			return NULL;
-		}
-#endif
 	}
 
 	/* @todo: there is no good place to create queues. */
@@ -3696,17 +3715,17 @@ spdk_nvmf_rdma_poll_group_destroy(struct spdk_nvmf_transport_poll_group *group)
 		return;
 	}
 
+	rtransport = SPDK_CONTAINEROF(rgroup->group.transport, struct spdk_nvmf_rdma_transport, transport);
+
 	if (rgroup->pacer) {
-		if (rgroup->pacer_tuner) {
+		if (rtransport->transport.opts.io_pacer_tuner_type == 0) {
 			spdk_io_pacer_tuner_destroy(rgroup->pacer_tuner);
-		} else if (rgroup->pacer_tuner2) {
+		} else {
 			spdk_io_pacer_tuner2_destroy(rgroup->pacer_tuner2);
 		}
 
 		spdk_io_pacer_destroy(rgroup->pacer);
 	}
-
-	rtransport = SPDK_CONTAINEROF(rgroup->group.transport, struct spdk_nvmf_rdma_transport, transport);
 
 	pthread_mutex_lock(&rtransport->lock);
 	next_rgroup = TAILQ_NEXT(rgroup, link);
