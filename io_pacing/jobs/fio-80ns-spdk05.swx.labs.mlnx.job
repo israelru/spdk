@@ -1,0 +1,96 @@
+[global]
+ioengine=spdk
+numjobs=1
+cpus_allowed=11-15
+cpus_allowed_policy=split
+
+[job1]
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=1
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=6
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=11
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=16
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=21
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=26
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=31
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=36
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=41
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=46
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=51
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=56
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=61
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=66
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=71
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=76
+
+[job2]
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=2
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=7
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=12
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=17
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=22
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=27
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=32
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=37
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=42
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=47
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=52
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=57
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=62
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=67
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=72
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=77
+
+[job3]
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=3
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=8
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=13
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=18
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=23
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=28
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=33
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=38
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=43
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=48
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=53
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=58
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=63
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=68
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=73
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=78
+
+[job4]
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=4
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=9
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=14
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=19
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=24
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=29
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=34
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=39
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=44
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=49
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=54
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=59
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=64
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=69
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=74
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=79
+
+[job5]
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=5
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=10
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=15
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=20
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=25
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=30
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=35
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=40
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=45
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=50
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=55
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=60
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=65
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=70
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=75
+filename=trtype=rdma adrfam=ipv4 traddr=2.2.107.1 trsvcid=4420 ns=80
+
