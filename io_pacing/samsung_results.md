@@ -829,3 +829,29 @@ Just 6Mb of cache distributed between slow block devices. Fast devices' operatio
 
 
 For the cases with more than 48 slow bdevs we probably have a bug in algorithm so data for 64, 72, 80 are quite suspicious.
+
+
+**Unfair time sharing algo**
+
+Pacer manages bdevs according their weights. So bdev with the weight 1 will be managed every pacer's iteration but bdev with the weight
+3 will be managed only once per 3 pacer iterations.
+Weights are distributed lineary according bdevs latencies relations. See pic.
+
+
+| P  | Num delay bdevs | BW    | BW Max | WIRE BW  | AVG LAT, us | BW STDDEV | L3 Hit Rate | Bufs in-flight (MiB) | Pacer period, us |
+|----|-----------------|-------|--------|----------|-------------|-----------|-------------|----------------------|------------------|
+| 1  | 0               | 178.4 | 182.2  | 189.7676 | 2996.7      | .1        | 98.1        | 29.0 (3.6)           | 23.3             |
+| 1  | 16              | 177.4 | 193.3  | 188.5783 | 3013.4      | .8        | 96.9        | 42.0 (5.2)           | 23.4             |
+| 1  | 32              | 144.9 | 184.3  | 158.8584 | 3689.6      | 2.0       | 85.3        | 78.3 (9.7)           | 25.1             |
+| 2  | 0               | 178.3 | 205.7  | 189.6024 | 2999.2      | 1.3       | 98.7        | 29.0 (3.6)           | 23.3             |
+| 2  | 16              | 177.3 | 190.8  | 188.4575 | 3015.0      | .6        | 97.4        | 46.3 (5.7)           | 23.3             |
+| 2  | 32              | 160.5 | 199.0  | 180.0936 | 3329.9      | 3.3       | 89.5        | 51.3 (6.4)           | 24.2             |
+| 4  | 0               | 165.1 | 212.7  | 171.697  | 3239.0      | 4.5       | 99.3        | 46.0 (5.7)           | 23.3             |
+| 4  | 16              | 166.6 | 206.7  | 179.8208 | 3205.7      | 4.0       | 98.0        | 66.6 (8.3)           | 23.3             |
+| 4  | 32              | 162.9 | 213.3  | 160.5687 | 3281.2      | 5.6       | 94.1        | 62.6 (7.8)           | 23.3             |
+| 8  | 0               | 137.0 | 253.6  | 136.9724 | 3900.1      | 8.5       | 99.3        | 13.6 (1.7)           | 23.2             |
+| 8  | 16              | 176.8 | 210.8  | 188.9935 | 3019.0      | 2.1       | 99.1        | 32.0 (4.0)           | 23.2             |
+| 8  | 32              | 164.9 | 199.0  | 188.874  | 3242.1      | 6.5       | 98.2        | 44.3 (5.5)           | 23.3             |
+| 16 | 0               | 123.9 | 171.1  | 125.2514 | 4315.2      | 3.1       | 99.3        | 19.0 (2.3)           | 23.3             |
+| 16 | 16              | 174.5 | 212.8  | 185.0827 | 3053.6      | 3.6       | 98.9        | 31.6 (3.9)           | 23.2             |
+| 16 | 32              | 90.9  | 180.1  | 79.4169  | 5875.1      | 9.7       | 99.2        | 21.0 (2.6)           | 23.2             |
