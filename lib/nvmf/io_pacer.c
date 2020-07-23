@@ -31,6 +31,7 @@
  */
 
 #include <alloca.h>
+#include <math.h>
 
 #include "spdk/config.h"
 #include "io_pacer.h"
@@ -116,7 +117,6 @@ io_pacer_poll(void *arg)
 	struct io_pacer_queue_entry *entry;
 	uint32_t next_queue = pacer->next_queue;
 	int rc = 0;
-	uint32_t bytes_in_flight = 0;
 
 	const uint64_t cur_tick = spdk_get_ticks();
 	const uint64_t ticks_diff = cur_tick - pacer->last_tick;
@@ -575,22 +575,6 @@ struct spdk_io_pacer_tuner3 {
     uint64_t period_us;
 };
 
-static void
-_spdk_bdev_histogram_status_cb(void *cb_arg, int status)
-{
-}
-
-
-static int log2fast(int v) {
-	int r; // result of log_2(v) goes here
-	union { unsigned int u[2]; double d; } t; // temp
-
-	t.u[__FLOAT_WORD_ORDER__==__ORDER_LITTLE_ENDIAN__] = 0x43300000;
-	t.u[__FLOAT_WORD_ORDER__!=__ORDER_LITTLE_ENDIAN__] = v;
-	t.d -= 4503599627370496.0;
-	r = (t.u[__FLOAT_WORD_ORDER__==__ORDER_LITTLE_ENDIAN__] >> 20) - 0x3FF;
-	return r;
-}
 
 static void
 get_iostat_cb(struct spdk_bdev *bdev,
@@ -624,20 +608,13 @@ static inline float shift(float rate, float x1)
 static int
 io_pacer_tune3(void *arg)
 {
-	/*
 	struct spdk_io_pacer_tuner2 *tuner = arg;
 	struct spdk_io_pacer *pacer = tuner->pacer;
-	*/
 	const void *next_key;
 	void *next_data;
 	uint32_t iter = 0;
 	uint32_t drives_count = 0;
 
-	const uint64_t total_cache_to_share = 12 * (1 << 20) >> 1;
-	uint64_t rest_of_cache = 0;
-	uint32_t additional_pieces = 0;
-	uint32_t weight_unit_cost = 0;
-	uint32_t credit_bins = 2;
 	struct drive_stats *stats_list[MAX_DRIVES_STATS] = {0};
 	enum tune_state {NOT_READY, READY_TO_COLLECT, COLLECTING,
 		REQUESTING_LATENCIES, APPLYING, SLEEPING};
@@ -653,7 +630,7 @@ io_pacer_tune3(void *arg)
 	uint64_t min_write_latency_ticks = 0;
 	uint64_t max_write_latency_ticks = 0;
 	float tg = 0.;
-	uint32_t weight_total = 0;
+	float b = 0.;
 	
 	/* really try_to_setup */ /* FIXME rename function */
 	spdk_io_pacer_drive_stats_setup(&drives_stats, MAX_DRIVES_STATS);
@@ -677,14 +654,6 @@ io_pacer_tune3(void *arg)
 
 	switch (state) {
 	case NOT_READY:
-#ifdef HAVE_HISTOGRAM_ENABLE
-		SPDK_NOTICELOG("Tune3 starting latency collection\n");
-		for (iter = 0; iter < drives_count; iter++) {
-			spdk_bdev_histogram_enable(stats_list[iter]->bdev,
-						   _spdk_bdev_histogram_status_cb,
-						   NULL, true);
-		}
-#endif
 		state = READY_TO_COLLECT;
 		break; /* TODO check if we can remove this break */
 	case READY_TO_COLLECT:
@@ -702,13 +671,6 @@ io_pacer_tune3(void *arg)
 	case COLLECTING:
 		if (collecting_time_counter == COLLECTING_TIME) {
 			SPDK_NOTICELOG("Tune3 stopping latency collection\n");
-#ifdef HAVE_HISTOGRAM_ENABLE
-			for (iter = 0; iter < drives_count; iter++) {
-				spdk_bdev_histogram_enable(stats_list[iter]->bdev,
-							   _spdk_bdev_histogram_status_cb,
-							   NULL, false);
-			}
-#endif
 			state = APPLYING;
 		} else {
 			++collecting_time_counter;
@@ -722,13 +684,17 @@ io_pacer_tune3(void *arg)
 		min_write_latency_ticks = max_write_latency_ticks =
 			stats_list[0]->write_latency_ticks;
 		for (iter = 0; iter < drives_count; iter++) {
-			if (stats_list[iter]->read_latency_ticks < min_read_latency_ticks) 
+			if (stats_list[iter]->read_latency_ticks &&
+			    stats_list[iter]->read_latency_ticks < min_read_latency_ticks) 
 				min_read_latency_ticks = stats_list[iter]->read_latency_ticks;
-			if (stats_list[iter]->read_latency_ticks > max_read_latency_ticks) 
+			if (stats_list[iter]->read_latency_ticks &&
+			    stats_list[iter]->read_latency_ticks > max_read_latency_ticks) 
 				max_read_latency_ticks = stats_list[iter]->read_latency_ticks;
-			if (stats_list[iter]->write_latency_ticks < min_write_latency_ticks) 
+			if (stats_list[iter]->write_latency_ticks &&
+			    stats_list[iter]->write_latency_ticks < min_write_latency_ticks) 
 				min_write_latency_ticks = stats_list[iter]->write_latency_ticks;
-			if (stats_list[iter]->write_latency_ticks > max_write_latency_ticks) 
+			if (stats_list[iter]->write_latency_ticks &&
+			    stats_list[iter]->write_latency_ticks > max_write_latency_ticks) 
 				max_write_latency_ticks = stats_list[iter]->write_latency_ticks;
 		}
 		state = SLEEPING;
@@ -742,47 +708,14 @@ io_pacer_tune3(void *arg)
 			       min_write_latency_ticks,
 			       max_write_latency_ticks);
 
-#if 0
-		tg = (float) credit_bins /
-			((float) max_read_latency_ticks -
-			 (float) min_read_latency_ticks);
-
-		for (iter = 0; iter < drives_count; iter++) {
-			uint8_t bin_number = tg * (float)
-				(stats_list[iter]->read_latency_ticks -
-				 min_read_latency_ticks);
-			uint8_t weight = credit_bins - bin_number;
-			stats_list[iter]->weight = (weight != 0) ? weight : 1;
-			weight_total += (stats_list[iter]->weight) == 1 ? 1 : 0;
-		}
-		weight_unit_cost = 1 << log2fast(total_cache_to_share / weight_total);
-		for (iter = 0; iter < drives_count; iter++) {
-			stats_list[iter]->credit = stats_list[iter]->weight *
-				                   weight_unit_cost;
-		}
-
-                rest_of_cache = total_cache_to_share - weight_unit_cost * weight_total;
-		additional_pieces  = rest_of_cache / weight_unit_cost;
-
-		iter = 0;
-		SPDK_NOTICELOG("Tune3 additional_pieces: %"PRIu32"\n",
-			       additional_pieces);
-	        while(additional_pieces) {
-			if (stats_list[iter]->weight == credit_bins) {
-				stats_list[iter]->credit += weight_unit_cost;
-				--additional_pieces;
-
-			}
-		        iter = (iter + 1) % drives_count;
-		}
-#endif
 		tg = rate(pacer->disk_credit, min_read_latency_ticks,
 			  max_read_latency_ticks);
 		b = shift(tg, min_read_latency_ticks);
 
+		SPDK_NOTICELOG("Tune3 params tg: %f, b: %f\n", tg, b);
 		for (iter = 0; iter < drives_count; iter++) {
-			stats_list[iter]->weight = tg *
-				(float) stats_list[iter]->read_latency_ticks + shift
+			stats_list[iter]->weight = roundf(tg *
+				(float) stats_list[iter]->read_latency_ticks + b);
 		}
 
 		for (iter = 0; iter < drives_count; iter++) {
@@ -790,7 +723,6 @@ io_pacer_tune3(void *arg)
 			bdev_name = spdk_bdev_get_name(stats_list[iter]->bdev);
 			SPDK_NOTICELOG("Tune3 %s read_latency_ticks: %"PRIu64
 				       ", weight: %"PRIu32
-				       ", credit: %"PRIu32
 				       ", bytes_in_flight: %"PRIu32"\n",
 				       bdev_name,
 				       stats_list[iter]->read_latency_ticks,
