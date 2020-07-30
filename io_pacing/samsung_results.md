@@ -1092,3 +1092,57 @@ CPU mask 0xFFFF, IO pacer period 2875, adjusted period 46000, credit size 65536,
 | 128k/3:8k/97  | 2875         | 16384           | 16  | 142.3 | 148.6  | 152.6074 | 170.5       | .5        | 97.2        | 211.6 (1.6)          | 52.6             |
 | 128k/3:8k/97  | 2875         | 16384           | 32  | 177.4 | 189.4  | 191.7087 | 273.9       | .6        | 91.8        | 480.6 (3.7)          | 50.3             |
 | 128k/3:8k/97  | 2875         | 16384           | 256 | 96.0  | 144.6  | 104.6163 | 4001.6      | .5        | 52.2        | 2871.6 (22.4)        | 53.8             |
+
+#### WRITE tests
+### test_14
+Basic test with IO pacing.
+
+**Configuration**: `config_nvme`
+
+**Initiator**: `fio+SPDK`
+
+**CPU mask**: 0xF0 (4 cores)
+
+FIO with 8 jobs.
+
+CPU mask , num cores 4, IO pacer period 5600, adjusted period 22400
+
+| QD   | BW    | BW Max | WIRE BW  | AVG LAT, us | BW STDDEV | L3 Hit Rate | Bufs in-flight (MiB) | Pacer period, us |
+| ---  | ---   | ---    | ---      | ---         | ---       | ---         | ----                 | ---              |
+| 256  | 182.9 | 185.0  | 195.0071 | 2934.5      | .5        | 98.7        | 34.6 (4.3)           | 22.7             |
+| 2048 | 148.1 | 149.1  | 156.6744 | 29002.9     | .2        | 99.4        | 24.0 (3.0)           | 22.6             |
+
+CPU mask , num cores 4, IO pacer period 5650, adjusted period 22600|
+
+| QD   | BW    | BW Max | WIRE BW  | AVG LAT, us | BW STDDEV | L3 Hit Rate | Bufs in-flight (MiB) | Pacer period, us |
+| ---  | ---   | ---    | ---      | ---         | ---       | ---         | ----                 | ---              |
+| 256  | 183.4 | 185.0  | 195.5182 | 2926.6      | .5        | 99.4        | 21.0 (2.6)           | 22.9             |
+| 2048 | 149.3 | 150.8  | 159.4529 | 28767.2     | .1        | 99.4        | 25.6 (3.2)           | 22.8             |
+
+CPU mask , num cores 4, IO pacer period 5700, adjusted period 22800|
+
+| QD   | BW    | BW Max | WIRE BW  | AVG LAT, us | BW STDDEV | L3 Hit Rate | Bufs in-flight (MiB) | Pacer period, us |
+| ---  | ---   | ---    | ---      | ---         | ---       | ---         | ----                 | ---              |
+| 256  | 182.1 | 183.7  | 194.2378 | 2947.3      | .6        | 99.4        | 16.3 (2.0)           | 23.3             |
+| 2048 | 148.1 | 149.8  | 157.4128 | 28990.7     | .2        | 99.4        | 24.6 (3.0)           | 23.1             |
+
+CPU mask , num cores 4, IO pacer period 5750, adjusted period 23000|
+
+| QD   | BW    | BW Max | WIRE BW  | AVG LAT, us | BW STDDEV | L3 Hit Rate | Bufs in-flight (MiB) | Pacer period, us |
+| ---  | ---   | ---    | ---      | ---         | ---       | ---         | ----                 | ---              |
+| 256  | 180.6 | 183.5  | 190.4368 | 2972.4      | .6        | 99.4        | 16.3 (2.0)           | 23.4             |
+| 2048 | 148.0 | 149.5  | 157.6193 | 29014.2     | .2        | 99.4        | 24.3 (3.0)           | 23.3             |
+
+CPU mask , num cores 4, IO pacer period 5800, adjusted period 23200|
+
+| QD   | BW    | BW Max | WIRE BW  | AVG LAT, us | BW STDDEV | L3 Hit Rate | Bufs in-flight (MiB) | Pacer period, us |
+| ---  | ---   | ---    | ---      | ---         | ---       | ---         | ----                 | ---              |
+| 256  | 179.0 | 180.4  | 190.8089 | 2998.1      | .5        | 99.4        | 13.6 (1.7)           | 23.4             |
+| 2048 | 147.9 | 148.4  | 157.1142 | 29038.7     | .1        | 99.5        | 25.3 (3.1)           | 23.3             |
+
+CPU mask , num cores 4, IO pacer period 6000, adjusted period 24000|
+
+| QD   | BW    | BW Max | WIRE BW  | AVG LAT, us | BW STDDEV | L3 Hit Rate | Bufs in-flight (MiB) | Pacer period, us |
+| ---  | ---   | ---    | ---      | ---         | ---       | ---         | ----                 | ---              |
+| 256  | 173.3 | 175.1  | 184.5085 | 3097.6      | .5        | 99.4        | 15.0 (1.8)           | 24.2             |
+| 2048 | 148.6 | 149.7  | 157.3441 | 28908.2     | .1        | 99.3        | 24.6 (3.0)           | 24.2             |
