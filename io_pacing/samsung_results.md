@@ -1149,14 +1149,16 @@ CPU mask , num cores 4, IO pacer period 6000, adjusted period 24000|
 | 2048 | 148.6 | 149.7  | 157.3441 | 28908.2     | .1        | 99.3        | 24.6 (3.0)           | 24.2             |
 
 ### Test 18 (write mode)
-
+**In capsule data = 0**
 Mixed IO sizes.
 
 Total queue depth (max number of in-flight IO requests) is `QD*num_jobs*num_hosts = QD*8*2`
 Bufs-in-flight based tuner.
 
 CPU mask 0xFFFF, IO pacer period 2875, adjusted period 46000, credit size 65536, num buffers 131072, buf cache 8192.
+
 |       IO size | Pacer period | Pacer threshold | QD  |    BW | BW Max |  WIRE BW | AVG LAT, us | BW STDDEV | L3 Hit Rate | Bufs in-flight (MiB) | Pacer period, us |
+| ---           | ---          | ---             | --- | ---   | ---    | ---      | ---         | ---       | ---         | ---                  | ---              |
 |          128k | 0            |               0 | 16  | 112.3 | 411.9  |  109.746 | 2422.0      |       7.1 | 82.0        |        1722.6 (13.4) |                  |
 |          128k | 0            |               0 | 32  |  98.3 | 382.4  |  82.9283 | 5660.5      |       7.6 | 88.5        |        6741.3 (52.6) |                  |
 |          128k | 0            |               0 | 256 |  75.5 | 407.0  |  89.5388 | 59178.5     |       8.4 | 67.0        |      29888.0 (233.5) |                  |
