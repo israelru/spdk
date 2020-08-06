@@ -377,6 +377,10 @@ nvmf_tgt_advance_state(void)
 				SPDK_NOTICELOG("Custom identify ctrlr handler enabled\n");
 				spdk_nvmf_set_custom_admin_cmd_hdlr(SPDK_NVME_OPC_IDENTIFY, nvmf_custom_identify_hdlr);
 			}
+
+			spdk_nvmf_set_passthru_admin_cmd(SPDK_NVME_OPC_SECURITY_SEND, 0);
+			spdk_nvmf_set_passthru_admin_cmd(SPDK_NVME_OPC_SECURITY_RECEIVE, 0);
+
 			/* Create poll group threads, and send a message to each thread
 			 * and create a poll group.
 			 */
