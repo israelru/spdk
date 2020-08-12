@@ -708,6 +708,9 @@ io_pacer_tune3(void *arg)
 			       min_write_latency_ticks,
 			       max_write_latency_ticks);
 
+		float dev = (max_read_latency_ticks - min_read_latency_ticks) /
+				min_read_latency_ticks;
+		if (dev < 0.1) break;
 		tg = rate(pacer->disk_credit, min_read_latency_ticks,
 			  max_read_latency_ticks);
 		b = shift(tg, min_read_latency_ticks);
