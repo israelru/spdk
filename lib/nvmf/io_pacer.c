@@ -553,6 +553,11 @@ struct drive_stats* spdk_io_pacer_drive_stats_create(struct spdk_io_pacer_drives
 		return 0;
 
 	drive_stats_lock(stats);
+
+	ret = rte_hash_lookup(h, &key);
+	if (ret != -ENOENT)
+		return 0;
+
 	data = calloc(1, sizeof(struct drive_stats));
 	rte_atomic32_init(&data->ops_in_flight);
 	/* FIXME just workaround to test */
