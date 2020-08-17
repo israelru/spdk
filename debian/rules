@@ -39,6 +39,7 @@ override_dh_auto_configure:
 		--disable-coverage \
 		--disable-debug \
 		--disable-tests \
+		--with-ocf \
 		--without-isal \
 		--without-crypto \
 		--without-fio \
