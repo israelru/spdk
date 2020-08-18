@@ -161,6 +161,7 @@ struct ns_worker_ctx {
 #if HAVE_LIBAIO
 		struct {
 			struct io_event		*events;
+			int			max_events;
 			io_context_t		ctx;
 		} aio;
 #endif
@@ -183,7 +184,10 @@ struct perf_task {
 	bool			is_read;
 	struct spdk_dif_ctx	dif_ctx;
 #if HAVE_LIBAIO
+	struct iocb		*iocbs;
+	struct iocb		**iocbpp;
 	struct iocb		iocb;
+	int			events_remain;
 #endif
 };
 
@@ -303,7 +307,6 @@ nvme_perf_next_sge(void *ref, void **address, uint32_t *length)
 	return 0;
 }
 
-
 static int
 nvme_perf_allocate_iovs(struct perf_task *task, void *buf, uint32_t length)
 {
@@ -317,8 +320,25 @@ nvme_perf_allocate_iovs(struct perf_task *task, void *buf, uint32_t length)
 		if (!task->iovs) {
 			return -1;
 		}
+#ifdef HAVE_LIBAIO
+		task->iocbs = calloc(task->iovcnt, sizeof(struct iocb));
+		if (!task->iocbs) {
+			free(task->iovs);
+			return -1;
+		}
+		task->iocbpp = calloc(task->iovcnt, sizeof(struct iocb *));
+		if (!task->iocbpp) {
+			free(task->iovs);
+			free(task->iocbs);
+			return -1;
+		}
+#endif
 	} else {
 		task->iovs = &task->iov;
+#ifdef HAVE_LIBAIO
+		task->iocbs = &task->iocb;
+		task->iocbpp = &task->iocbs;
+#endif
 	}
 
 	for (task->iovpos = 0; task->iovpos < task->iovcnt; task->iovpos++) {
@@ -344,15 +364,22 @@ nvme_perf_allocate_iovs(struct perf_task *task, void *buf, uint32_t length)
 static void
 uring_setup_payload(struct perf_task *task, uint8_t pattern)
 {
-	task->iov.iov_base = spdk_dma_zmalloc(g_io_size_bytes, g_io_align, NULL);
-	task->iov.iov_len = g_io_size_bytes;
-	if (task->iov.iov_base == NULL) {
-		fprintf(stderr, "spdk_dma_zmalloc() for task->iov.iov_base failed\n");
+	int rc;
+	void *buf;
+
+	buf = spdk_dma_zmalloc(g_io_size_bytes, g_io_align, NULL);
+	if (buf == NULL) {
+		fprintf(stderr, "spdk_dma_zmalloc() failed\n");
 		exit(1);
 	}
-	memset(task->iov.iov_base, pattern, task->iov.iov_len);
+	memset(buf, pattern, g_io_size_bytes);
 
-	task->iovs = &task->iov;
+	rc = nvme_perf_allocate_iovs(task, buf, g_io_size_bytes);
+	if (rc < 0) {
+		fprintf(stderr, "perf task failed to allocate iovs\n");
+		spdk_dma_free(buf);
+		exit(1);
+	}
 }
 
 static int
@@ -368,9 +395,11 @@ uring_submit_io(struct perf_task *task, struct ns_worker_ctx *ns_ctx,
 	}
 
 	if (task->is_read) {
-		io_uring_prep_readv(sqe, entry->u.uring.fd, &task->iov, 1, offset_in_ios * task->iov.iov_len);
+		io_uring_prep_readv(sqe, entry->u.uring.fd, task->iovs, task->iovcnt,
+				    offset_in_ios * g_io_size_bytes);
 	} else {
-		io_uring_prep_writev(sqe, entry->u.uring.fd, &task->iov, 1, offset_in_ios * task->iov.iov_len);
+		io_uring_prep_writev(sqe, entry->u.uring.fd, task->iovs, task->iovcnt,
+				     offset_in_ios * g_io_size_bytes);
 	}
 
 	io_uring_sqe_set_data(sqe, task);
@@ -405,7 +434,7 @@ uring_check_io(struct ns_worker_ctx *ns_ctx)
 		for (i = 0; i < count; i++) {
 			assert(ns_ctx->u.uring.cqes[i] != NULL);
 			task = (struct perf_task *)ns_ctx->u.uring.cqes[i]->user_data;
-			if (ns_ctx->u.uring.cqes[i]->res != (int)task->iov.iov_len) {
+			if (ns_ctx->u.uring.cqes[i]->res != (int)g_io_size_bytes) {
 				fprintf(stderr, "cqe[i]->status=%d\n", ns_ctx->u.uring.cqes[i]->res);
 				exit(0);
 			}
@@ -452,38 +481,57 @@ static const struct ns_fn_table uring_fn_table = {
 	.init_ns_worker_ctx     = uring_init_ns_worker_ctx,
 	.cleanup_ns_worker_ctx  = uring_cleanup_ns_worker_ctx,
 };
-
 #endif
 
 #ifdef HAVE_LIBAIO
 static void
 aio_setup_payload(struct perf_task *task, uint8_t pattern)
 {
-	task->iov.iov_base = spdk_dma_zmalloc(g_io_size_bytes, g_io_align, NULL);
-	task->iov.iov_len = g_io_size_bytes;
-	if (task->iov.iov_base == NULL) {
+	int rc;
+	void *buf;
+
+	buf = spdk_dma_zmalloc(g_io_size_bytes, g_io_align, NULL);
+	if (buf == NULL) {
 		fprintf(stderr, "spdk_dma_zmalloc() for task->buf failed\n");
 		exit(1);
 	}
-	memset(task->iov.iov_base, pattern, task->iov.iov_len);
+	memset(buf, pattern, g_io_size_bytes);
 
-	task->iovs = &task->iov;
+	rc = nvme_perf_allocate_iovs(task, buf, g_io_size_bytes);
+	if (rc < 0) {
+		fprintf(stderr, "perf task iov count exceeds MAX_IOVS\n");
+		spdk_dma_free(buf);
+		exit(1);
+	}
 }
 
 static int
 aio_submit(io_context_t aio_ctx, struct iocb *iocb, int fd, enum io_iocb_cmd cmd,
-	   struct iovec *iov, uint64_t offset, void *cb_ctx)
+	   struct iovec *iov, uint64_t offset_in_ios, void *cb_ctx)
 {
-	iocb->aio_fildes = fd;
-	iocb->aio_reqprio = 0;
-	iocb->aio_lio_opcode = cmd;
-	iocb->u.c.buf = iov->iov_base;
-	iocb->u.c.nbytes = iov->iov_len;
-	iocb->u.c.offset = offset * iov->iov_len;
-	iocb->data = cb_ctx;
+	int rc, i;
+	uint64_t offset = offset_in_ios * g_io_size_bytes;
+	struct perf_task *task = (struct perf_task *)cb_ctx;
 
-	if (io_submit(aio_ctx, 1, &iocb) < 0) {
-		printf("io_submit");
+	for (i = 0; i < task->iovcnt; i++) {
+		iocb[i].aio_fildes = fd;
+		iocb[i].aio_reqprio = 0;
+		iocb[i].aio_lio_opcode = cmd;
+		iocb[i].u.c.buf = iov[i].iov_base;
+		iocb[i].u.c.nbytes = iov[i].iov_len;
+		iocb[i].u.c.offset = offset;
+		iocb[i].data = cb_ctx;
+		task->iocbpp[i] = &iocb[i];
+		offset += iov[i].iov_len;
+	}
+
+	rc = io_submit(aio_ctx, task->iovcnt, task->iocbpp);
+	if (rc < task->iovcnt) {
+		if (rc < 0) {
+			perror("io_submit");
+		} else {
+			fprintf(stderr, "io_submit failed %d/%d\n", task->iovcnt, rc);
+		}
 		return -1;
 	}
 
@@ -494,12 +542,13 @@ static int
 aio_submit_io(struct perf_task *task, struct ns_worker_ctx *ns_ctx,
 	      struct ns_entry *entry, uint64_t offset_in_ios)
 {
+	task->events_remain = task->iovcnt;
 	if (task->is_read) {
-		return aio_submit(ns_ctx->u.aio.ctx, &task->iocb, entry->u.aio.fd, IO_CMD_PREAD,
-				  &task->iov, offset_in_ios, task);
+		return aio_submit(ns_ctx->u.aio.ctx, task->iocbs, entry->u.aio.fd, IO_CMD_PREAD,
+				  task->iovs, offset_in_ios, task);
 	} else {
-		return aio_submit(ns_ctx->u.aio.ctx, &task->iocb, entry->u.aio.fd, IO_CMD_PWRITE,
-				  &task->iov, offset_in_ios, task);
+		return aio_submit(ns_ctx->u.aio.ctx, task->iocbs, entry->u.aio.fd, IO_CMD_PWRITE,
+				  task->iovs, offset_in_ios, task);
 	}
 }
 
@@ -508,18 +557,24 @@ aio_check_io(struct ns_worker_ctx *ns_ctx)
 {
 	int count, i;
 	struct timespec timeout;
+	struct perf_task *task;
 
 	timeout.tv_sec = 0;
 	timeout.tv_nsec = 0;
 
-	count = io_getevents(ns_ctx->u.aio.ctx, 1, g_queue_depth, ns_ctx->u.aio.events, &timeout);
+	count = io_getevents(ns_ctx->u.aio.ctx, 1, ns_ctx->u.aio.max_events,
+			     ns_ctx->u.aio.events, &timeout);
 	if (count < 0) {
 		fprintf(stderr, "io_getevents error\n");
 		exit(1);
 	}
 
 	for (i = 0; i < count; i++) {
-		task_complete(ns_ctx->u.aio.events[i].data);
+		task = ns_ctx->u.aio.events[i].data;
+		task->events_remain--;
+		if (!task->events_remain) {
+			task_complete(task);
+		}
 	}
 }
 
@@ -531,12 +586,17 @@ aio_verify_io(struct perf_task *task, struct ns_entry *entry)
 static int
 aio_init_ns_worker_ctx(struct ns_worker_ctx *ns_ctx)
 {
-	ns_ctx->u.aio.events = calloc(g_queue_depth, sizeof(struct io_event));
+	ns_ctx->u.aio.max_events =
+		SPDK_CEIL_DIV(g_io_size_bytes, (uint64_t)g_io_unit_size) *
+		g_queue_depth;
+
+	ns_ctx->u.aio.events =
+		calloc(ns_ctx->u.aio.max_events, sizeof(struct io_event));
 	if (!ns_ctx->u.aio.events) {
 		return -1;
 	}
 	ns_ctx->u.aio.ctx = 0;
-	if (io_setup(g_queue_depth, &ns_ctx->u.aio.ctx) < 0) {
+	if (io_setup(ns_ctx->u.aio.max_events, &ns_ctx->u.aio.ctx) < 0) {
 		free(ns_ctx->u.aio.events);
 		perror("io_setup");
 		return -1;
@@ -1243,6 +1303,10 @@ task_complete(struct perf_task *task)
 		spdk_dma_free(task->iovs[0].iov_base);
 		if (task->iovcnt > 1) {
 			free(task->iovs);
+#ifdef HAVE_LIBAIO
+			free(task->iocbs);
+			free(task->iocbpp);
+#endif
 		}
 		spdk_dma_free(task->md_iov.iov_base);
 		free(task);
