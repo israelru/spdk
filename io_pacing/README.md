@@ -136,6 +136,8 @@ Results for Intel disks write flow: [intel_write.md](intel_write.md)
 
 Results for Intel disks small IOs: [intel_small.md](intel_small.md)
 
+Results for Mixed disks: [mixed_results.md](mixed_results.md)
+
 | Test #              | IO pacing            | Disks                   | Description                                  |
 |---------------------|----------------------|-------------------------|----------------------------------------------|
 | [Test 1](#test-1)   | none                 | 1 Null                  | Basic test                                   |
