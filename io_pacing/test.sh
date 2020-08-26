@@ -1280,6 +1280,7 @@ function test_14_16_cores()
 	      IO_SIZE=128k \
 	      IO_PACER_PERIOD=$ADJUSTED_PERIOD \
 	      IO_PACER_CREDIT=65536 \
+	      IO_PACER_TUNER_FACTOR=5 \
 	      test_base
 	sleep 3
     done
@@ -1450,7 +1451,7 @@ function test_18()
 	    for io_size in "128k" "4k" "128k/80:4k/20" "128k/20:4k/80" "128k/3:4k/97"; do
 #	    for io_size in "8k" "128k/80:8k/20" "128k/20:8k/80" "128k/3:8k/97"; do
 #	    for io_size in "128k/80:4k/20"; do
-		local factor=3
+		local factor=7
 		ADJUSTED_PERIOD="$(M_SCALE=0 m $io_pacer*$NUM_CORES/1)"
 		num_buffers=131072
 		buf_cache=$((num_buffers/NUM_CORES))
@@ -1468,7 +1469,7 @@ function test_18()
 		      IO_PACER_CREDIT=65536 \
 		      IO_PACER_THRESHOLD=$threshold \
 		      IO_PACER_TUNER_FACTOR=$factor \
-		      IN_CAPSULE_DATA=4096 \
+		      IN_CAPSULE_DATA=0 \
 		      test_base
 		sleep 3
 	    done
