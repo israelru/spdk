@@ -92,7 +92,8 @@ struct nvme_tcp_qpair {
 	struct {
 		uint16_t host_hdgst_enable: 1;
 		uint16_t host_ddgst_enable: 1;
-		uint16_t reserved: 14;
+		uint16_t icreq_send_ack: 1;
+		uint16_t reserved: 13;
 	} flags;
 
 	/** Specifies the maximum number of PDU-Data bytes per H2C Data Transfer PDU */
@@ -154,6 +155,7 @@ struct nvme_tcp_req {
 };
 
 static void nvme_tcp_send_h2c_data(struct nvme_tcp_req *tcp_req);
+static void nvme_tcp_icresp_handle(struct nvme_tcp_qpair *tqpair, struct nvme_tcp_pdu *pdu);
 
 static inline struct nvme_tcp_qpair *
 nvme_tcp_qpair(struct spdk_nvme_qpair *qpair)
@@ -964,8 +966,15 @@ nvme_tcp_pdu_payload_handle(struct nvme_tcp_qpair *tqpair,
 static void
 nvme_tcp_send_icreq_complete(void *cb_arg)
 {
-	SPDK_DEBUGLOG(SPDK_LOG_NVME, "Complete the icreq send for tqpair=%p\n",
-		      (struct nvme_tcp_qpair *)cb_arg);
+	struct nvme_tcp_qpair *tqpair = cb_arg;
+	SPDK_DEBUGLOG(SPDK_LOG_NVME, "Complete the icreq send for tqpair=%p\n", tqpair);
+
+	tqpair->flags.icreq_send_ack = true;
+
+	if (tqpair->state == NVME_TCP_QPAIR_STATE_INITIALIZING) {
+		SPDK_DEBUGLOG(SPDK_LOG_NVME, "qpair %u, finilize icresp\n", tqpair->qpair.id);
+		nvme_tcp_icresp_handle(tqpair, &tqpair->recv_pdu);
+	}
 }
 
 static void
@@ -976,6 +985,12 @@ nvme_tcp_icresp_handle(struct nvme_tcp_qpair *tqpair,
 	uint32_t error_offset = 0;
 	enum spdk_nvme_tcp_term_req_fes fes;
 	int recv_buf_size;
+
+	if (!tqpair->flags.icreq_send_ack) {
+		tqpair->state = NVME_TCP_QPAIR_STATE_INITIALIZING;
+		SPDK_DEBUGLOG(SPDK_LOG_NVME, "qpair %u, waiting icreq ack\n", tqpair->qpair.id);
+		return;
+	}
 
 	/* Only PFV 0 is defined currently */
 	if (ic_resp->pfv != 0) {
@@ -1612,7 +1627,7 @@ nvme_tcp_qpair_icreq_send(struct nvme_tcp_qpair *tqpair)
 	icreq_timeout_tsc = spdk_get_ticks() + (NVME_TCP_TIME_OUT_IN_SECONDS * spdk_get_ticks_hz());
 	do {
 		rc = nvme_tcp_qpair_process_completions(&tqpair->qpair, 0);
-	} while ((tqpair->state == NVME_TCP_QPAIR_STATE_INVALID) &&
+	} while ((tqpair->state != NVME_TCP_QPAIR_STATE_RUNNING) &&
 		 (rc == 0) && (spdk_get_ticks() <= icreq_timeout_tsc));
 
 	if (tqpair->state != NVME_TCP_QPAIR_STATE_RUNNING) {
