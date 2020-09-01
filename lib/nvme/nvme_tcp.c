@@ -1682,6 +1682,14 @@ nvme_tcp_ctrlr_connect_qpair(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_qpa
 		return -1;
 	}
 
+	if (qpair->poll_group) {
+		rc = nvme_poll_group_connect_qpair(qpair);
+		if (rc) {
+			SPDK_ERRLOG("Unable to activate the tcp qpair.\n");
+			return -1;
+		}
+	}
+
 	tqpair->maxr2t = NVME_TCP_MAX_R2T_DEFAULT;
 	/* Explicitly set the state and recv_state of tqpair */
 	tqpair->state = NVME_TCP_QPAIR_STATE_INVALID;
