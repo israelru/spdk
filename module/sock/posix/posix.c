@@ -555,13 +555,8 @@ retry:
 		return NULL;
 	}
 
-	if (type == SPDK_SOCK_CREATE_LISTEN) {
-		/* Only enable zero copy for non-loopback sockets. */
-		enable_zero_copy = opts->zcopy && !sock_is_loopback(fd);
-	} else if (type == SPDK_SOCK_CREATE_CONNECT) {
-		/* Disable zero copy for client sockets until support is added */
-		enable_zero_copy = false;
-	}
+	/* Only enable zero copy for non-loopback sockets. */
+	enable_zero_copy = opts->zcopy && !sock_is_loopback(fd);
 
 	sock = posix_sock_alloc(fd, enable_zero_copy);
 	if (sock == NULL) {
