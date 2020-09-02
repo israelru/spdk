@@ -148,7 +148,7 @@ spdk_nvmf_transport_create(const char *transport_name, struct spdk_nvmf_transpor
 	transport->data_buf_pool = spdk_mempool_create(spdk_mempool_name,
 				   opts->num_shared_buffers,
 				   opts->io_unit_size + NVMF_DATA_BUFFER_ALIGNMENT,
-				   SPDK_MEMPOOL_DEFAULT_CACHE_SIZE,
+				   0,
 				   SPDK_ENV_SOCKET_ID_ANY);
 
 	if (!transport->data_buf_pool) {
