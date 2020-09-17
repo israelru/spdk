@@ -13,7 +13,7 @@ git clone https://github.com/Mellanox/spdk.git
 cd spdk
 git checkout io_pacing
 git submodule update --init
-./configure --with-rdma --prefix=$PWD/install-$HOSTNAME --disable-unit-tests
+./configure --with-rdma --prefix=$PWD/install --disable-unit-tests --disable-tests
 make
 make install
 ~~~
@@ -43,7 +43,7 @@ git clone https://github.com/Mellanox/spdk.git
 cd spdk
 git checkout io_pacing
 git submodule update --init
-./configure --with-rdma --prefix=$PWD/install-$HOSTNAME --disable-unit-tests --with-fio=$PWD/../fio
+./configure --with-rdma --prefix=$PWD/install-$HOSTNAME --disable-unit-tests --disable-tests --with-fio=$PWD/../fio
 make
 make install
 cp ./examples/nvme/fio_plugin/fio_plugin install-$HOSTNAME/lib
