@@ -127,6 +127,14 @@ spdk_nvmf_transport_create(const char *transport_name, struct spdk_nvmf_transpor
 		opts->max_aq_depth = SPDK_NVMF_MIN_ADMIN_MAX_SQ_SIZE;
 	}
 
+	if (!spdk_u32_is_pow2(opts->io_buffer_alignment) ||
+	    opts->io_buffer_alignment < SPDK_CACHE_LINE_SIZE) {
+		SPDK_ERRLOG("io_buffer_alignment %u is not power of 2 or less than SPDK cache line size (%d)."
+			    " Use default value %llu\n", opts->io_buffer_alignment, SPDK_CACHE_LINE_SIZE,
+			    NVMF_DATA_BUFFER_ALIGNMENT);
+		opts->io_buffer_alignment = NVMF_DATA_BUFFER_ALIGNMENT;
+	}
+
 	transport = ops->create(opts);
 	if (!transport) {
 		SPDK_ERRLOG("Unable to create new transport of type %s\n", transport_name);
@@ -147,7 +155,7 @@ spdk_nvmf_transport_create(const char *transport_name, struct spdk_nvmf_transpor
 
 	transport->data_buf_pool = spdk_mempool_create(spdk_mempool_name,
 				   opts->num_shared_buffers,
-				   opts->io_unit_size + NVMF_DATA_BUFFER_ALIGNMENT,
+				   opts->io_unit_size + opts->io_buffer_alignment,
 				   SPDK_MEMPOOL_DEFAULT_CACHE_SIZE,
 				   SPDK_ENV_SOCKET_ID_ANY);
 
@@ -519,6 +527,7 @@ spdk_nvmf_transport_opts_init(const char *transport_name,
 	}
 
 	opts->association_timeout = NVMF_TRANSPORT_DEFAULT_ASSOCIATION_TIMEOUT_IN_MS;
+	opts->io_buffer_alignment = NVMF_DATA_BUFFER_ALIGNMENT;
 	ops->opts_init(opts);
 	return true;
 }
@@ -569,11 +578,11 @@ spdk_nvmf_request_free_buffers(struct spdk_nvmf_request *req,
 
 static inline int
 nvmf_request_set_buffer(struct spdk_nvmf_request *req, void *buf, uint32_t length,
-			uint32_t io_unit_size)
+			uint32_t io_unit_size, uint32_t io_buffer_alignment_mask)
 {
 	req->buffers[req->iovcnt] = buf;
-	req->iov[req->iovcnt].iov_base = (void *)((uintptr_t)(buf + NVMF_DATA_BUFFER_MASK) &
-					 ~NVMF_DATA_BUFFER_MASK);
+	req->iov[req->iovcnt].iov_base = (void *)((uintptr_t)(buf + io_buffer_alignment_mask) &
+					 ~io_buffer_alignment_mask);
 	req->iov[req->iovcnt].iov_len  = spdk_min(length, io_unit_size);
 	length -= req->iov[req->iovcnt].iov_len;
 	req->iovcnt++;
@@ -589,6 +598,7 @@ nvmf_request_get_buffers(struct spdk_nvmf_request *req,
 {
 	uint32_t io_unit_size = transport->opts.io_unit_size;
 	uint32_t num_buffers;
+	uint32_t io_buffer_alignment_mask = transport->opts.io_buffer_alignment - 1;
 	uint32_t i = 0, j;
 	void *buffer, *buffers[NVMF_REQ_MAX_BUFFERS];
 
@@ -607,7 +617,7 @@ nvmf_request_get_buffers(struct spdk_nvmf_request *req,
 			STAILQ_REMOVE_HEAD(&group->buf_cache, link);
 			assert(buffer != NULL);
 
-			length = nvmf_request_set_buffer(req, buffer, length, io_unit_size);
+			length = nvmf_request_set_buffer(req, buffer, length, io_unit_size, io_buffer_alignment_mask);
 			i++;
 		} else {
 			if (spdk_mempool_get_bulk(transport->data_buf_pool, buffers,
@@ -615,7 +625,7 @@ nvmf_request_get_buffers(struct spdk_nvmf_request *req,
 				return -ENOMEM;
 			}
 			for (j = 0; j < num_buffers - i; j++) {
-				length = nvmf_request_set_buffer(req, buffers[j], length, io_unit_size);
+				length = nvmf_request_set_buffer(req, buffers[j], length, io_unit_size, io_buffer_alignment_mask);
 			}
 			i += num_buffers - i;
 		}

@@ -635,6 +635,12 @@ nvmf_parse_transport(struct nvmf_parse_transport_ctx *ctx)
 	bval = spdk_conf_section_get_boolval(ctx->sp, "DifInsertOrStrip", false);
 	opts.dif_insert_or_strip = bval;
 
+	val = spdk_conf_section_get_intval(ctx->sp, "IOBufferAlignment");
+	if (val >= 0) {
+		opts.io_buffer_alignment = val;
+	}
+
+
 	transport = spdk_nvmf_transport_create(type, &opts);
 	if (transport) {
 		spdk_nvmf_tgt_add_transport(g_spdk_nvmf_tgt, transport, nvmf_tgt_add_transport_done, ctx);

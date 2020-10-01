@@ -1552,12 +1552,13 @@ nvmf_rdma_fill_wr_sgl(struct spdk_nvmf_rdma_poll_group *rgroup,
 	while (length && (num_extra_wrs || wr->num_sge < SPDK_NVMF_MAX_SGL_ENTRIES)) {
 		while (spdk_unlikely(!nvmf_rdma_fill_wr_sge(device, &req->iov[rdma_req->iovpos], &wr,
 				     &remaining_data_block, &offset, &num_extra_wrs, dif_ctx))) {
+			uint32_t io_buffer_alignment_mask = rgroup->group.transport->opts.io_buffer_alignment - 1;
+
 			if (nvmf_rdma_replace_buffer(rgroup, &req->buffers[rdma_req->iovpos]) == -ENOMEM) {
 				return -ENOMEM;
 			}
 			req->iov[rdma_req->iovpos].iov_base = (void *)((uintptr_t)(req->buffers[rdma_req->iovpos] +
-							      NVMF_DATA_BUFFER_MASK) &
-							      ~NVMF_DATA_BUFFER_MASK);
+							      io_buffer_alignment_mask) & ~io_buffer_alignment_mask);
 		}
 
 		length -= req->iov[rdma_req->iovpos].iov_len;
@@ -2453,10 +2454,11 @@ nvmf_rdma_create(struct spdk_nvmf_transport_opts *opts)
 
 	if (opts->io_unit_size * max_device_sge < opts->max_io_size) {
 		/* divide and round up. */
-		opts->io_unit_size = (opts->max_io_size + max_device_sge - 1) / max_device_sge;
+		opts->io_unit_size = SPDK_CEIL_DIV(opts->max_io_size, max_device_sge);
 
-		/* round up to the nearest 4k. */
-		opts->io_unit_size = (opts->io_unit_size + NVMF_DATA_BUFFER_ALIGNMENT - 1) & ~NVMF_DATA_BUFFER_MASK;
+		/* round up to the nearest io_buffer_alignemnt. */
+		opts->io_unit_size = (opts->io_unit_size + opts->io_buffer_alignment - 1) & ~
+				     (opts->io_buffer_alignment - 1);
 
 		opts->io_unit_size = spdk_max(opts->io_unit_size, SPDK_NVMF_RDMA_MIN_IO_BUFFER_SIZE);
 		SPDK_NOTICELOG("Adjusting the io unit size to fit the device's maximum I/O size. New I/O unit size %u\n",

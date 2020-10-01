@@ -4714,6 +4714,7 @@ dif_insert_or_strip         | Optional | boolean | Enable DIF insert for write I
 sock_priority               | Optional | number  | The socket priority of the connection owned by this transport (TCP only)
 acceptor_backlog            | Optional | number  | The number of pending connections allowed in backlog before failing new connection attempts (RDMA only)
 abort_timeout_sec           | Optional | number  | Abort execution timeout value, in seconds
+io_buffer_alignment         | Optional | number  | IO buffers alignment, in bytes. Must be power of 2 and not smaller than cache line size
 
 ### Example
 

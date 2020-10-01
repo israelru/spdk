@@ -109,7 +109,8 @@ def nvmf_create_transport(client,
                           dif_insert_or_strip=None,
                           sock_priority=None,
                           acceptor_backlog=None,
-                          abort_timeout_sec=None):
+                          abort_timeout_sec=None,
+                          io_buffer_alignment=None):
     """NVMf Transport Create options.
 
     Args:
@@ -129,6 +130,7 @@ def nvmf_create_transport(client,
         dif_insert_or_strip: Boolean flag to enable DIF insert/strip for I/O - TCP specific (optional)
         acceptor_backlog: Pending connections allowed at one time - RDMA specific (optional)
         abort_timeout_sec: Abort execution timeout value, in seconds (optional)
+        io_buffer_alignment: IO buffer alignment, in bytes, must be power of 2 and not smaller than cache line size (optional)
 
     Returns:
         True or False
@@ -171,6 +173,8 @@ def nvmf_create_transport(client,
         params['acceptor_backlog'] = acceptor_backlog
     if abort_timeout_sec:
         params['abort_timeout_sec'] = abort_timeout_sec
+    if io_buffer_alignment:
+        params['io_buffer_alignment'] = io_buffer_alignment
     return client.call('nvmf_create_transport', params)
 
 

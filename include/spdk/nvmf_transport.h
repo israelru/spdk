@@ -54,7 +54,6 @@
  * extra 4KiB aligned data buffer should work for most devices.
  */
 #define NVMF_DATA_BUFFER_ALIGNMENT	VALUE_4KB
-#define NVMF_DATA_BUFFER_MASK		(NVMF_DATA_BUFFER_ALIGNMENT - 1LL)
 
 union nvmf_h2c_msg {
 	struct spdk_nvmf_capsule_cmd			nvmf_cmd;
