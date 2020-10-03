@@ -18,7 +18,8 @@ def sock_impl_set_options(client,
                           enable_recv_pipe=None,
                           enable_zerocopy_send=None,
                           enable_quickack=None,
-                          enable_placement_id=None):
+                          enable_placement_id=None,
+                          zerocopy_send_threshold=None):
     """Set parameters for the socket layer implementation.
 
     Args:
@@ -29,6 +30,7 @@ def sock_impl_set_options(client,
         enable_zerocopy_send: enable or disable zerocopy on send (optional)
         enable_quickack: enable or disable quickack (optional)
         enable_placement_id: enable or disable placement_id (optional)
+        zerocopy_send_threshold: zero copy send threshold (optional)
     """
     params = {}
 
@@ -45,5 +47,7 @@ def sock_impl_set_options(client,
         params['enable_quickack'] = enable_quickack
     if enable_placement_id is not None:
         params['enable_placement_id'] = enable_placement_id
+    if zerocopy_send_threshold is not None:
+        params['zerocopy_send_threshold'] = zerocopy_send_threshold
 
     return client.call('sock_impl_set_options', params)

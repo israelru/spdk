@@ -53,6 +53,7 @@
 
 #if defined(SO_ZEROCOPY) && defined(MSG_ZEROCOPY)
 #define SPDK_ZEROCOPY
+#warning "Zero-copy enabled"
 #endif
 
 struct spdk_posix_sock {
@@ -84,6 +85,7 @@ static struct spdk_sock_impl_opts g_spdk_posix_sock_impl_opts = {
 	.enable_zerocopy_send = true,
 	.enable_quickack = false,
 	.enable_placement_id = false,
+	.zerocopy_send_threshold = 0
 };
 
 static int
@@ -337,8 +339,13 @@ posix_sock_alloc(int fd, bool enable_zero_copy)
 	rc = setsockopt(sock->fd, SOL_SOCKET, SO_ZEROCOPY, &flag, sizeof(flag));
 	if (rc == 0) {
 		sock->zcopy = true;
+		SPDK_NOTICELOG("Using zcopy for socket %d\n", sock->fd);
 	}
 #endif
+
+	if (!sock->zcopy) {
+		SPDK_NOTICELOG("Not using zcopy for socket %d\n", sock->fd);
+	}
 
 #if defined(__linux__)
 	flag = 1;
@@ -708,10 +715,12 @@ _sock_check_zcopy(struct spdk_sock *sock)
 		 * non-match is found.
 		 */
 		for (idx = serr->ee_info; idx <= serr->ee_data; idx++) {
+			/* SPDK_NOTICELOG("Got sent notification with idx %lu\n", idx); */
 			found = false;
 			TAILQ_FOREACH_SAFE(req, &sock->pending_reqs, internal.link, treq) {
 				if (req->internal.offset == idx) {
 					found = true;
+					/* SPDK_NOTICELOG("Putting req %p\n", req); */
 
 					rc = spdk_sock_request_put(sock, req, 0);
 					if (rc < 0) {
@@ -730,86 +739,53 @@ _sock_check_zcopy(struct spdk_sock *sock)
 }
 #endif
 
-static int
-_sock_flush(struct spdk_sock *sock)
+static int _send_and_consume_reqs(struct spdk_sock *sock,
+				  struct iovec *iovs,
+				  int iovcnt,
+				  bool zcopy)
 {
 	struct spdk_posix_sock *psock = __posix_sock(sock);
+	struct spdk_sock_request *req;
 	struct msghdr msg = {};
 	int flags;
-	struct iovec iovs[IOV_BATCH_SIZE];
-	int iovcnt;
-	int retval;
-	struct spdk_sock_request *req;
 	int i;
-	ssize_t rc;
 	unsigned int offset;
 	size_t len;
+	ssize_t rc, res;
 
-	/* Can't flush from within a callback or we end up with recursive calls */
-	if (sock->cb_cnt > 0) {
-		return 0;
-	}
-
-	/* Gather an iov */
-	iovcnt = 0;
-	req = TAILQ_FIRST(&sock->queued_reqs);
-	while (req) {
-		offset = req->internal.offset;
-
-		for (i = 0; i < req->iovcnt; i++) {
-			/* Consume any offset first */
-			if (offset >= SPDK_SOCK_REQUEST_IOV(req, i)->iov_len) {
-				offset -= SPDK_SOCK_REQUEST_IOV(req, i)->iov_len;
-				continue;
-			}
-
-			iovs[iovcnt].iov_base = SPDK_SOCK_REQUEST_IOV(req, i)->iov_base + offset;
-			iovs[iovcnt].iov_len = SPDK_SOCK_REQUEST_IOV(req, i)->iov_len - offset;
-			iovcnt++;
-
-			offset = 0;
-
-			if (iovcnt >= IOV_BATCH_SIZE) {
-				break;
-			}
-		}
-
-		if (iovcnt >= IOV_BATCH_SIZE) {
-			break;
-		}
-
-		req = TAILQ_NEXT(req, internal.link);
-	}
-
-	if (iovcnt == 0) {
-		return 0;
-	}
+	/* SPDK_NOTICELOG("Send and consume sock %d, iovs %ld, zcopy %d, idx %lu\n", */
+	/* 	       psock->fd, iovcnt, zcopy, psock->sendmsg_idx); */
 
 	/* Perform the vectored write */
 	msg.msg_iov = iovs;
 	msg.msg_iovlen = iovcnt;
 #ifdef SPDK_ZEROCOPY
-	if (psock->zcopy) {
+	if (zcopy) {
 		flags = MSG_ZEROCOPY;
 	} else
 #endif
 	{
 		flags = 0;
 	}
-	rc = sendmsg(psock->fd, &msg, flags);
+	res = rc = sendmsg(psock->fd, &msg, flags);
 	if (rc <= 0) {
-		if (errno == EAGAIN || errno == EWOULDBLOCK || (errno == ENOBUFS && psock->zcopy)) {
+		if (errno == EAGAIN || errno == EWOULDBLOCK || (errno == ENOBUFS && zcopy)) {
 			return 0;
+		}
+		if (rc < 0) {
+			SPDK_ERRLOG("sendmsg failed, rc %ld, errno %d\n", rc, errno);
 		}
 		return rc;
 	}
 
-	/* Handling overflow case, because we use psock->sendmsg_idx - 1 for the
-	 * req->internal.offset, so sendmsg_idx should not be zero  */
-	if (spdk_unlikely(psock->sendmsg_idx == UINT32_MAX)) {
-		psock->sendmsg_idx = 1;
-	} else {
-		psock->sendmsg_idx++;
+	if (zcopy) {
+		/* Handling overflow case, because we use psock->sendmsg_idx - 1 for the
+		 * req->internal.offset, so sendmsg_idx should not be zero  */
+		if (spdk_unlikely(psock->sendmsg_idx == UINT32_MAX)) {
+			psock->sendmsg_idx = 1;
+		} else {
+			psock->sendmsg_idx++;
+		}
 	}
 
 	/* Consume the requests that were actually written */
@@ -830,7 +806,7 @@ _sock_flush(struct spdk_sock *sock)
 			if (len > (size_t)rc) {
 				/* This element was partially sent. */
 				req->internal.offset += rc;
-				return 0;
+				return res;
 			}
 
 			offset = 0;
@@ -838,14 +814,15 @@ _sock_flush(struct spdk_sock *sock)
 			rc -= len;
 		}
 
+		/* SPDK_NOTICELOG("Request %p written, sock %d, zcopy %d\n", req, psock->fd, zcopy); */
 		/* Handled a full request. */
 		spdk_sock_request_pend(sock, req);
 
-		if (!psock->zcopy) {
+		if (!zcopy) {
 			/* The sendmsg syscall above isn't currently asynchronous,
 			* so it's already done. */
-			retval = spdk_sock_request_put(sock, req, 0);
-			if (retval) {
+			/* SPDK_NOTICELOG("Putting req %p\n", req); */
+			if (spdk_sock_request_put(sock, req, 0)) {
 				break;
 			}
 		} else {
@@ -860,6 +837,102 @@ _sock_flush(struct spdk_sock *sock)
 		}
 
 		req = TAILQ_FIRST(&sock->queued_reqs);
+	}
+
+	return res;
+}
+
+static int
+_sock_flush(struct spdk_sock *sock)
+{
+	struct spdk_posix_sock *psock = __posix_sock(sock);
+	struct iovec iovs[IOV_BATCH_SIZE];
+	int iovcnt;
+	struct spdk_sock_request *req;
+	int i;
+	ssize_t rc;
+	unsigned int offset;
+	ssize_t len;
+	bool send_zcopy = psock->zcopy;
+
+	/* Can't flush from within a callback or we end up with recursive calls */
+	if (sock->cb_cnt > 0) {
+		return 0;
+	}
+
+	/* Gather an iov */
+	iovcnt = 0;
+	len = 0;
+	req = TAILQ_FIRST(&sock->queued_reqs);
+	while (req) {
+		offset = req->internal.offset;
+
+		/* SPDK_NOTICELOG("Flushing sock %d, request %p with %d iovs, offset %ld\n", */
+		/* 	       psock->fd, req, req->iovcnt, req->internal.offset); */
+
+		for (i = 0; i < req->iovcnt; i++) {
+			uint32_t iov_len = SPDK_SOCK_REQUEST_IOV(req, i)->iov_len;
+
+			/* Consume any offset first */
+			if (offset >= iov_len) {
+				offset -= iov_len;
+				continue;
+			}
+
+			/* SPDK_NOTICELOG("Flushing sock %d, req %p, iov %d, len %ld\n", */
+			/* 	       psock->fd, req, i, iov_len); */
+
+			if (psock->zcopy) {
+				if (iovcnt == 0) {
+					send_zcopy = iov_len >= g_spdk_posix_sock_impl_opts.zerocopy_send_threshold;
+				}
+
+				if ((send_zcopy &&
+				     iov_len < g_spdk_posix_sock_impl_opts.zerocopy_send_threshold) ||
+				    (!send_zcopy &&
+				     iov_len >= g_spdk_posix_sock_impl_opts.zerocopy_send_threshold)) {
+					/* SPDK_NOTICELOG("iov chain broken due to size: send_zcopy %d, iov_len %ld, threshold %ld\n", */
+					/* 	       send_zcopy, iov_len, g_spdk_posix_sock_impl_opts.zerocopy_send_threshold); */
+					/* End of same size buffers chain, send */
+					rc = _send_and_consume_reqs(sock, iovs, iovcnt, send_zcopy);
+					if (rc < 0) {
+						return rc;
+					} else if (rc < len) {
+						/* Not all data was sent. No reason to continue */
+						return 0;
+					}
+					send_zcopy = !send_zcopy;
+					iovcnt = 0;
+					len = 0;
+				}
+			}
+
+			iovs[iovcnt].iov_base = SPDK_SOCK_REQUEST_IOV(req, i)->iov_base + offset;
+			iovs[iovcnt].iov_len = iov_len - offset;
+			iovcnt++;
+			len += iov_len;
+
+			offset = 0;
+
+			if (iovcnt >= IOV_BATCH_SIZE) {
+				break;
+			}
+		}
+
+		if (iovcnt >= IOV_BATCH_SIZE) {
+			break;
+		}
+
+		req = TAILQ_NEXT(req, internal.link);
+	}
+
+	if (iovcnt == 0) {
+		return 0;
+	}
+
+	rc = _send_and_consume_reqs(sock, iovs, iovcnt, send_zcopy);
+	if (rc < 0) {
+		return rc;
 	}
 
 	return 0;
@@ -1359,6 +1432,7 @@ posix_sock_impl_get_opts(struct spdk_sock_impl_opts *opts, size_t *len)
 	GET_FIELD(enable_zerocopy_send);
 	GET_FIELD(enable_quickack);
 	GET_FIELD(enable_placement_id);
+	GET_FIELD(zerocopy_send_threshold);
 
 #undef GET_FIELD
 #undef FIELD_OK
@@ -1389,6 +1463,7 @@ posix_sock_impl_set_opts(const struct spdk_sock_impl_opts *opts, size_t len)
 	SET_FIELD(enable_zerocopy_send);
 	SET_FIELD(enable_quickack);
 	SET_FIELD(enable_placement_id);
+	SET_FIELD(zerocopy_send_threshold);
 
 #undef SET_FIELD
 #undef FIELD_OK

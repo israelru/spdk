@@ -118,6 +118,10 @@ struct spdk_sock_impl_opts {
 	 */
 	bool enable_placement_id;
 
+	/**
+	 * Buffers below this threshold will be sent without zero copy. Used by posix socket module.
+	 */
+	uint32_t zerocopy_send_threshold;
 };
 
 /**

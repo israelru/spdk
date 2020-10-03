@@ -77,6 +77,7 @@ rpc_sock_impl_get_options(struct spdk_jsonrpc_request *request,
 	spdk_json_write_named_bool(w, "enable_zerocopy_send", sock_opts.enable_zerocopy_send);
 	spdk_json_write_named_bool(w, "enable_quickack", sock_opts.enable_quickack);
 	spdk_json_write_named_bool(w, "enable_placement_id", sock_opts.enable_placement_id);
+	spdk_json_write_named_uint32(w, "zerocopy_send_threshold", sock_opts.zerocopy_send_threshold);
 	spdk_json_write_object_end(w);
 	spdk_jsonrpc_end_result(request, w);
 	free(impl_name);
@@ -118,7 +119,10 @@ static const struct spdk_json_object_decoder rpc_sock_impl_set_opts_decoders[] =
 		"enable_placement_id", offsetof(struct spdk_rpc_sock_impl_set_opts, sock_opts.enable_placement_id),
 		spdk_json_decode_bool, true
 	},
-
+	{
+		"zerocopy_send_threshold", offsetof(struct spdk_rpc_sock_impl_set_opts, sock_opts.zerocopy_send_threshold),
+		spdk_json_decode_uint32, true
+	},
 };
 
 static void
