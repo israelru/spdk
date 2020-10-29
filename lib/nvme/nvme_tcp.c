@@ -974,13 +974,14 @@ static void
 nvme_tcp_send_icreq_complete(void *cb_arg)
 {
 	struct nvme_tcp_qpair *tqpair = cb_arg;
-	SPDK_DEBUGLOG(SPDK_LOG_NVME, "Complete the icreq send for tqpair=%p\n", tqpair);
+
+	SPDK_DEBUGLOG(SPDK_LOG_NVME, "Complete the icreq send for tqpair=%p %u\n", tqpair, tqpair->qpair.id);
 
 	tqpair->flags.icreq_send_ack = true;
 
 	if (tqpair->state == NVME_TCP_QPAIR_STATE_INITIALIZING) {
-		SPDK_DEBUGLOG(SPDK_LOG_NVME, "qpair %u, finilize icresp\n", tqpair->qpair.id);
-		nvme_tcp_icresp_handle(tqpair, &tqpair->recv_pdu);
+		SPDK_DEBUGLOG(SPDK_LOG_NVME, "tqpair %p %u, finilize icresp\n", tqpair, tqpair->qpair.id);
+		tqpair->state = NVME_TCP_QPAIR_STATE_RUNNING;
 	}
 }
 
@@ -992,12 +993,6 @@ nvme_tcp_icresp_handle(struct nvme_tcp_qpair *tqpair,
 	uint32_t error_offset = 0;
 	enum spdk_nvme_tcp_term_req_fes fes;
 	int recv_buf_size;
-
-	if (!tqpair->flags.icreq_send_ack) {
-		tqpair->state = NVME_TCP_QPAIR_STATE_INITIALIZING;
-		SPDK_DEBUGLOG(SPDK_LOG_NVME, "qpair %u, waiting icreq ack\n", tqpair->qpair.id);
-		return;
-	}
 
 	/* Only PFV 0 is defined currently */
 	if (ic_resp->pfv != 0) {
@@ -1049,8 +1044,15 @@ nvme_tcp_icresp_handle(struct nvme_tcp_qpair *tqpair,
 		/* Not fatal. */
 	}
 
-	tqpair->state = NVME_TCP_QPAIR_STATE_RUNNING;
 	nvme_tcp_qpair_set_recv_state(tqpair, NVME_TCP_PDU_RECV_STATE_AWAIT_PDU_READY);
+
+	if (!tqpair->flags.icreq_send_ack) {
+		tqpair->state = NVME_TCP_QPAIR_STATE_INITIALIZING;
+		SPDK_DEBUGLOG(SPDK_LOG_NVME, "tqpair %p %u, waiting icreq ack\n", tqpair, tqpair->qpair.id);
+		return;
+	}
+
+	tqpair->state = NVME_TCP_QPAIR_STATE_RUNNING;
 	return;
 end:
 	nvme_tcp_qpair_send_h2c_term_req(tqpair, pdu, fes, error_offset);
