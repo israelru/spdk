@@ -490,7 +490,7 @@ io_pacer_tune2(void *arg)
 	new_period_ticks = spdk_min(new_period_ticks, tuner->max_pacer_period_ticks);
 
 	static __thread uint32_t log_counter = 0;
-	/* Try to log once per second */
+	/* Try to log once per second, to limit the log */
 	if (log_counter % (SPDK_SEC_TO_NSEC / tuner->period_ns) == 0) {
 		SPDK_NOTICELOG("IO pacer tuner %p: pacer %p, value %u, new period %lu ticks, min %lu, polls %u. ios %u\n",
 			       tuner,
