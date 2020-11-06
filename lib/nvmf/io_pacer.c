@@ -395,7 +395,7 @@ io_pacer_tune(void *arg)
 				    tuner->min_pacer_period_ticks);
 
 	static __thread uint32_t log_counter = 0;
-	/* Try to log once per second */
+	/* Try to log once per second so as to reduce num of traces */
 	if (log_counter % (SPDK_SEC_TO_NSEC / tuner->period_ns) == 0) {
 		SPDK_NOTICELOG("IO pacer tuner %p: pacer %p, bytes %lu, io period %lu ns, new period %lu ns, new period %lu ticks, min %lu, max %lu\n",
 			       tuner,
