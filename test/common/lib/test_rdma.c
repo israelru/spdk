@@ -58,6 +58,7 @@ DEFINE_STUB_V(spdk_rdma_register_translation_method,
 
 /* used to mock out having to split an SGL over a memory region */
 size_t g_mr_size;
+uint64_t g_mr_next_size;
 struct ibv_mr g_rdma_mr = {
 	.addr = (void *)0xC0FFEE,
 	.length = 0x1000,
@@ -77,6 +78,9 @@ spdk_rdma_get_translation(struct spdk_rdma_qp *qp, struct spdk_rdma_mem_map *map
 	HANDLE_RETURN_MOCK(spdk_rdma_get_translation);
 
 	if (g_mr_size && length > g_mr_size) {
+		if (g_mr_next_size) {
+			g_mr_size = g_mr_next_size;
+		}
 		return -ERANGE;
 	}
 
