@@ -140,6 +140,8 @@ enum spdk_bdev_io_type {
 	SPDK_BDEV_IO_TYPE_COMPARE,
 	SPDK_BDEV_IO_TYPE_COMPARE_AND_WRITE,
 	SPDK_BDEV_IO_TYPE_ABORT,
+	/* bdev module doesn't read or modify data in IO request */
+	SPDK_BDEV_IO_TYPE_DATA_PASSTHRU,
 	SPDK_BDEV_NUM_IO_TYPES /* Keep last */
 };
 

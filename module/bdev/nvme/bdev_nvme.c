@@ -744,6 +744,11 @@ bdev_nvme_io_type_supported(void *ctx, enum spdk_bdev_io_type io_type)
 			return true;
 		}
 		return false;
+	case SPDK_BDEV_IO_TYPE_DATA_PASSTHRU:
+		if (nvme_ns->ctrlr->connected_trid->trtype == SPDK_NVME_TRANSPORT_RDMA) {
+			return true;
+		}
+		return false;
 
 	default:
 		return false;
